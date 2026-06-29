@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { getNgVoice, setNgVoice, getAdvanceDir, setAdvanceDir } from './settings';
+import {
+  getNgVoice,
+  setNgVoice,
+  getAdvanceDir,
+  setAdvanceDir,
+  getSlowInput,
+  setSlowInput,
+} from './settings';
 
 beforeEach(() => {
   const store = new Map<string, string>();
@@ -20,6 +27,18 @@ describe('NG音声設定', () => {
     expect(getNgVoice()).toBe(false);
     setNgVoice(true);
     expect(getNgVoice()).toBe(true);
+  });
+});
+
+describe('ゆっくり入力設定', () => {
+  it('既定は無効', () => {
+    expect(getSlowInput()).toBe(false);
+  });
+  it('ONを保存して読み出せる', () => {
+    setSlowInput(true);
+    expect(getSlowInput()).toBe(true);
+    setSlowInput(false);
+    expect(getSlowInput()).toBe(false);
   });
 });
 

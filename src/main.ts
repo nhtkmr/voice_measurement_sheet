@@ -14,7 +14,7 @@ import { renderGrid, type ActiveCell } from './grid';
 import { judgeDimension } from './judge';
 import { columnStats, cpkLevelColor } from './stats';
 import { drawHistogram } from './histogram';
-import { parseNumber, parseCommand } from './voice/numberParser';
+import { parseNumber, parseCommand, type VoiceCommand } from './voice/numberParser';
 import {
   Recognizer,
   isVoiceSupported,
@@ -29,7 +29,15 @@ import {
   listSessions,
   deleteSession,
 } from './store';
-import { getNgVoice, setNgVoice, getAdvanceDir, setAdvanceDir, type AdvanceDir } from './settings';
+import {
+  getNgVoice,
+  setNgVoice,
+  getAdvanceDir,
+  setAdvanceDir,
+  getSlowInput,
+  setSlowInput,
+  type AdvanceDir,
+} from './settings';
 
 /** NG発生時のフィードバック。ビープは常時、「NGです」は設定ON時のみ。 */
 function announceNG(): void {
@@ -60,6 +68,7 @@ const els = {
   tplImportBtn: $('#tplImportBtn') as HTMLButtonElement,
   tplFile: $('#tplFile') as HTMLInputElement,
   ngVoiceChk: $('#ngVoiceChk') as HTMLInputElement,
+  slowInputChk: $('#slowInputChk') as HTMLInputElement,
   rowCount: $('#rowCount') as HTMLInputElement,
   advanceDir: $('#advanceDir') as HTMLSelectElement,
   voiceBtn: $('#voiceBtn') as HTMLButtonElement,
@@ -74,6 +83,17 @@ const els = {
 
 let state: AppState;
 let recognizer: Recognizer | null = null;
+
+// ゆっくり入力モード用: 認識断片を連結する保留バッファと無音確定タイマー
+let pendingBuf = '';
+let commitTimer: number | undefined;
+const SLOW_COMMIT_MS = 1200; // 無音→自動確定までの猶予（容易に調整可）
+
+/** 保留バッファと無音タイマーを破棄する。 */
+function resetPending(): void {
+  pendingBuf = '';
+  window.clearTimeout(commitTimer);
+}
 
 // ---------- セッション生成 ----------
 function emptyRow(items: MeasureItem[]): Row {
@@ -307,15 +327,7 @@ function handleVoiceFinal(text: string): void {
     return;
   }
   if (cmd === 'ok' || cmd === 'ng') {
-    if (item.type === 'visual') {
-      const j = cmd === 'ok' ? 'OK' : 'NG';
-      state.session.rows[row].judgments[col] = j;
-      if (j === 'NG') announceNG();
-      autosave();
-      // NGは測り直しのため進めず、その場に留める
-      if (j === 'NG') render();
-      else moveNext();
-    }
+    applyVisualJudge(cmd);
     return;
   }
 
@@ -330,6 +342,56 @@ function handleVoiceFinal(text: string): void {
   }
 }
 
+/** 目視項目のOK/NG音声判定。OKは前進、NGは測り直しのため留まる。 */
+function applyVisualJudge(cmd: 'ok' | 'ng'): void {
+  const { row, col } = state.active;
+  if (state.session.items[col].type !== 'visual') return;
+  const j = cmd === 'ok' ? 'OK' : 'NG';
+  state.session.rows[row].judgments[col] = j;
+  if (j === 'NG') announceNG();
+  autosave();
+  if (j === 'NG') render();
+  else moveNext();
+}
+
+/**
+ * ゆっくり入力モード: 保留バッファを現在セルへ確定する。
+ * force=true は「次/確定」コマンド由来で、解釈不可/空でも前進する。
+ */
+function commitPending(force: boolean): void {
+  const text = pendingBuf.trim();
+  resetPending();
+  els.transcript.textContent = text;
+  const { row, col } = state.active;
+  const item = state.session.items[col];
+  if (text !== '' && item.type === 'dimension') {
+    const num = parseNumber(text);
+    if (num != null) {
+      setValue(row, col, String(num)); // 既存: 判定・NG音・描画・autosave込み
+      // NGは測り直しのため進めず、その場に留める
+      if (state.session.rows[row].judgments[col] !== 'NG') moveNext();
+      return;
+    }
+  }
+  if (force) moveNext(); // 解釈不可/空でも「次」なら前進
+}
+
+/** ゆっくり入力モードでの音声コマンド処理。 */
+function handleSlowCommand(cmd: VoiceCommand): void {
+  if (cmd === 'next' || cmd === 'confirm') return commitPending(true);
+  if (cmd === 'prev') {
+    resetPending();
+    return movePrev();
+  }
+  if (cmd === 'undo') {
+    resetPending();
+    return setValue(state.active.row, state.active.col, '');
+  }
+  // ok/ng は目視項目用
+  resetPending();
+  applyVisualJudge(cmd);
+}
+
 function toggleVoice(): void {
   if (!isVoiceSupported()) {
     els.voiceStatus.textContent = '音声非対応(Edge/Chrome推奨)';
@@ -338,8 +400,29 @@ function toggleVoice(): void {
   if (!recognizer) {
     recognizer = new Recognizer({
       onResult: (t, isFinal) => {
-        if (isFinal) handleVoiceFinal(t.trim());
-        else els.transcript.textContent = '… ' + t;
+        if (!getSlowInput()) {
+          // 即時確定（従来動作）
+          if (isFinal) handleVoiceFinal(t.trim());
+          else els.transcript.textContent = '… ' + t;
+          return;
+        }
+        // ゆっくり入力: 断片をバッファに連結し、無音/コマンドでまとめて確定
+        if (!isFinal) {
+          els.transcript.textContent = '… ' + (pendingBuf + t);
+          return;
+        }
+        const frag = t.trim();
+        if (frag === '') return;
+        const cmd = parseCommand(frag);
+        if (cmd) {
+          window.clearTimeout(commitTimer);
+          handleSlowCommand(cmd);
+          return;
+        }
+        pendingBuf += frag;
+        els.transcript.textContent = pendingBuf;
+        window.clearTimeout(commitTimer);
+        commitTimer = window.setTimeout(() => commitPending(false), SLOW_COMMIT_MS);
       },
       onError: (m) => {
         els.voiceStatus.textContent = m;
@@ -351,8 +434,12 @@ function toggleVoice(): void {
       },
     });
   }
-  if (recognizer.listening) recognizer.stop();
-  else recognizer.start();
+  if (recognizer.listening) {
+    resetPending(); // 停止時に未確定の連結バッファを破棄
+    recognizer.stop();
+  } else {
+    recognizer.start();
+  }
 }
 
 // ---------- 自動保存 ----------
@@ -383,6 +470,7 @@ async function startNewSession(): Promise<void> {
   if (!tpl) return;
   const count = Math.max(1, Math.min(999, Math.floor(Number(els.rowCount.value) || 5)));
   window.clearTimeout(saveTimer);
+  resetPending(); // 前測定の連結バッファ・タイマーが残らないように
   state.session = newSessionFromTemplate(tpl, count);
   state.active = { row: 0, col: 0 };
   await saveSession(state.session);
@@ -450,6 +538,7 @@ async function loadSessionById(id: string): Promise<void> {
   await flushSave(); // 現在の編集内容を確実に保存してから切替（消失防止）
   const s = await getSession(id);
   if (!s) return;
+  resetPending(); // 別セッションへ切替時に連結バッファをクリア
   state.session = s;
   state.active = { row: 0, col: 0 };
   await saveSession(s); // 復元時の「現在のセッション」として設定
@@ -684,6 +773,11 @@ async function init(): Promise<void> {
   els.voiceBtn.addEventListener('click', toggleVoice);
   els.ngVoiceChk.checked = getNgVoice();
   els.ngVoiceChk.addEventListener('change', () => setNgVoice(els.ngVoiceChk.checked));
+  els.slowInputChk.checked = getSlowInput();
+  els.slowInputChk.addEventListener('change', () => {
+    setSlowInput(els.slowInputChk.checked);
+    resetPending(); // モード切替時に未確定バッファをクリア
+  });
   els.exportBtn.addEventListener('click', () => exportSession(state.session));
 
   if (!isVoiceSupported()) {

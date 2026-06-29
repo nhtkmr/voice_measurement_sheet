@@ -2,6 +2,7 @@
 
 const NG_VOICE_KEY = 'vms.ngVoice';
 const ADVANCE_DIR_KEY = 'vms.advanceDir';
+const SLOW_INPUT_KEY = 'vms.slowInput';
 
 /** NG時の「NGです」音声読み上げが有効か（既定: 有効） */
 export function getNgVoice(): boolean {
@@ -21,4 +22,13 @@ export function getAdvanceDir(): AdvanceDir {
 
 export function setAdvanceDir(dir: AdvanceDir): void {
   localStorage.setItem(ADVANCE_DIR_KEY, dir);
+}
+
+/** ゆっくり入力モード（認識断片を連結してまとめて確定）。既定: 無効 */
+export function getSlowInput(): boolean {
+  return localStorage.getItem(SLOW_INPUT_KEY) === '1';
+}
+
+export function setSlowInput(enabled: boolean): void {
+  localStorage.setItem(SLOW_INPUT_KEY, enabled ? '1' : '0');
 }

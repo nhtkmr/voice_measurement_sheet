@@ -33,6 +33,12 @@ describe('parseNumber', () => {
     expect(parseNumber('あいうえお')).toBeNull();
     expect(parseNumber('1.2.3')).toBeNull();
   });
+  it('ゆっくり入力: 断片の連結が1数値として解ける', () => {
+    // ゆっくり区切って話した断片を連結したもの（main.ts の保留バッファ相当）
+    expect(parseNumber('12' + '点' + '34')).toBe(12.34);
+    expect(parseNumber('十二' + '点' + '三四')).toBe(12.34);
+    expect(parseNumber('マイナス' + '0点' + '5')).toBe(-0.5);
+  });
 });
 
 describe('parseCommand', () => {
