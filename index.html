@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <meta name="theme-color" content="#1f6feb" />
+    <title>工程能力 音声測定シート</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="row">
+        <h1>工程能力 音声測定シート</h1>
+        <div class="spacer"></div>
+        <label>品番
+          <select id="partSelect"></select>
+        </label>
+        <button id="newBtn" type="button">新規測定</button>
+        <button id="saveBtn" type="button">途中保存</button>
+        <button id="loadBtn" type="button">読み込み</button>
+        <button id="tplBtn" type="button">テンプレ編集</button>
+        <button id="tplExportBtn" type="button">テンプレ書出</button>
+        <button id="tplImportBtn" type="button">テンプレ取込</button>
+        <input id="tplFile" type="file" accept="application/json,.json" hidden />
+      </div>
+      <div class="row">
+        <button id="voiceBtn" type="button" class="voice">🎤 音声開始</button>
+        <label class="toggle"><input type="checkbox" id="ngVoiceChk" /> NG音声</label>
+        <label class="num-field">本数 <input type="number" id="rowCount" min="1" max="999" value="5" /></label>
+        <label class="num-field">進む方向
+          <select id="advanceDir">
+            <option value="item">項目方向</option>
+            <option value="row">No.方向</option>
+          </select>
+        </label>
+        <button id="addRowBtn" type="button">＋ 1本追加</button>
+        <button id="exportBtn" type="button">Excel出力</button>
+        <div class="spacer"></div>
+        <span id="voiceStatus" class="status">待機中</span>
+        <span id="transcript" class="transcript"></span>
+      </div>
+    </header>
+
+    <main>
+      <div id="grid" class="grid-wrap"></div>
+      <section id="stats" class="stats"></section>
+    </main>
+
+    <dialog id="newDialog" class="confirm-dialog">
+      <form method="dialog">
+        <h2>新規測定</h2>
+        <p>現在の測定内容をどうしますか？</p>
+        <menu class="dialog-actions">
+          <button value="cancel">キャンセル</button>
+          <button value="discard" class="danger">破棄して新規</button>
+          <button value="save" class="primary">保存して新規</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="loadDialog" class="tpl-dialog">
+      <h2>保存データの読み込み</h2>
+      <div id="loadList" class="load-list"></div>
+      <menu class="dialog-actions">
+        <button type="button" id="loadClose">閉じる</button>
+      </menu>
+    </dialog>
+
+    <dialog id="tplDialog" class="tpl-dialog">
+      <form method="dialog" id="tplForm">
+        <h2>品番テンプレート編集</h2>
+        <div class="field">
+          <label>品番<input id="tplPartNo" required /></label>
+          <label>品名<input id="tplName" /></label>
+        </div>
+        <table id="tplItems" class="tpl-items"></table>
+        <button type="button" id="tplAddItem">＋ 項目追加</button>
+        <menu class="dialog-actions">
+          <button value="cancel" type="submit">キャンセル</button>
+          <button value="delete" type="submit" id="tplDelete" class="danger">削除</button>
+          <button value="save" type="submit" id="tplSave" class="primary">保存</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

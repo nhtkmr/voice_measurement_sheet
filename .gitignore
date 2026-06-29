@@ -1,0 +1,21 @@
+# 依存パッケージ
+node_modules/
+
+# ビルド成果物
+dist/
+
+# ログ・一時ファイル
+*.log
+dev-out.log
+dev-err.log
+
+# OS / エディタ
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 環境変数
+.env
+.env.local
+.env.*.local

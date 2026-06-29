@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/staticwebapp.config.json",
+  "routes": [
+    {
+      "route": "/*",
+      "allowedRoles": ["authenticated"]
+    }
+  ],
+  "responseOverrides": {
+    "401": {
+      "redirect": "/.auth/login/aad",
+      "statusCode": 302
+    }
+  },
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/assets/*", "*.{css,js,json,webmanifest,png,svg,ico}"]
+  },
+  "globalHeaders": {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "microphone=(self)"
+  },
+  "mimeTypes": {
+    ".webmanifest": "application/manifest+json"
+  }
+}
