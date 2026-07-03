@@ -58,6 +58,7 @@ const $ = <T extends HTMLElement>(sel: string) =>
 const els = {
   partSelect: $('#partSelect') as HTMLSelectElement,
   newBtn: $('#newBtn') as HTMLButtonElement,
+  fileName: $('#fileName') as HTMLInputElement,
   saveBtn: $('#saveBtn') as HTMLButtonElement,
   loadBtn: $('#loadBtn') as HTMLButtonElement,
   newDialog: $('#newDialog') as HTMLDialogElement,
@@ -476,13 +477,57 @@ async function startNewSession(): Promise<void> {
   state.session = newSessionFromTemplate(tpl, count);
   state.active = { row: 0, col: 0 };
   await saveSession(state.session);
+  syncFileNameField();
   render();
 }
 
 // ---------- 途中保存 / 読み込み ----------
+/** ISO日時を日本時間(JST)の年月日時分に分解（ゼロ埋め済み文字列） */
+function jstParts(iso: string): {
+  year: string;
+  month: string;
+  day: string;
+  hour: string;
+  minute: string;
+} {
+  const p = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(iso));
+  const get = (t: string) => p.find((x) => x.type === t)?.value ?? '';
+  return {
+    year: get('year'),
+    month: get('month'),
+    day: get('day'),
+    hour: get('hour'),
+    minute: get('minute'),
+  };
+}
+
+/** 保存名の既定値: 日本時間の yyyymmddhhmm */
+function defaultSaveName(iso: string): string {
+  const p = jstParts(iso);
+  return `${p.year}${p.month}${p.day}${p.hour}${p.minute}`;
+}
+
+/** 読み込み一覧用: 日本時間の "yyyy-mm-dd hh:mm" */
+function formatDateTime(iso: string): string {
+  const p = jstParts(iso);
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
+}
+
+/** 現在セッションの保存名を入力欄へ反映（未設定なら新規測定時の日時を既定に） */
+function syncFileNameField(): void {
+  els.fileName.value = state.session.label ?? defaultSaveName(state.session.date);
+}
+
 async function saveCurrent(): Promise<void> {
-  const memo = prompt('保存メモ（任意・空欄可）', state.session.label ?? '');
-  if (memo !== null) state.session.label = memo.trim() || undefined;
+  state.session.label = els.fileName.value.trim() || undefined;
   await flushSave();
   els.voiceStatus.textContent = '保存しました';
 }
@@ -501,7 +546,7 @@ async function openLoadDialog(): Promise<void> {
         (a, r) => a + r.judgments.filter((j) => j === 'NG').length,
         0
       );
-      const when = s.date.replace('T', ' ').slice(0, 16);
+      const when = formatDateTime(s.date);
       const editing = s.id === state.session.id ? ' ・編集中' : '';
 
       const rowEl = document.createElement('div');
@@ -509,7 +554,7 @@ async function openLoadDialog(): Promise<void> {
       const info = document.createElement('div');
       info.className = 'load-info';
       info.innerHTML =
-        `<b>${esc(s.label || s.partNo)}</b>` +
+        `<b>${esc(s.label || defaultSaveName(s.date))}</b>` +
         `<span>${esc(s.partNo)} / ${when} / ${s.rows.length}本 / NG ${ng}${editing}</span>`;
 
       const openBtn = document.createElement('button');
@@ -545,6 +590,7 @@ async function loadSessionById(id: string): Promise<void> {
   state.active = { row: 0, col: 0 };
   await saveSession(s); // 復元時の「現在のセッション」として設定
   els.loadDialog.close();
+  syncFileNameField();
   render();
 }
 
@@ -757,6 +803,7 @@ async function init(): Promise<void> {
   }
 
   refreshPartSelect();
+  syncFileNameField();
   render();
 
   // イベント
@@ -776,6 +823,11 @@ async function init(): Promise<void> {
     // cancel / その他: 何もしない
   });
   els.saveBtn.addEventListener('click', () => void saveCurrent());
+  // 名前を編集したら現在セッションへ反映し自動保存に載せる
+  els.fileName.addEventListener('input', () => {
+    state.session.label = els.fileName.value.trim() || undefined;
+    autosave();
+  });
   els.loadBtn.addEventListener('click', () => void openLoadDialog());
   els.loadClose.addEventListener('click', () => els.loadDialog.close());
   els.partSelect.addEventListener('change', () => {
