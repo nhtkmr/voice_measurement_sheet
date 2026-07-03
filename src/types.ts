@@ -18,8 +18,9 @@ export interface MeasureItem {
 
 /** 品番テンプレート */
 export interface Template {
-  partNo: string; // 品番（キー）
-  name?: string; // 品名
+  partNo: string; // 品番（キーの一部）
+  name?: string; // 品名（キーの一部）
+  process?: string; // 工程（キーの一部）
   items: MeasureItem[];
 }
 
@@ -36,6 +37,7 @@ export interface Session {
   id: string;
   partNo: string;
   name?: string;
+  process?: string; // 工程（テンプレ選択状態の復元・表示用）
   label?: string; // 保存メモ（読み込み一覧での識別用、任意）
   date: string; // ISO
   items: MeasureItem[]; // セッション時点の列定義スナップショット

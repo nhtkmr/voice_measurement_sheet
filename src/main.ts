@@ -4,6 +4,7 @@ import {
   getTemplate,
   saveTemplate,
   deleteTemplate,
+  templateKey,
   sampleTemplate,
   loadTemplates,
   applyTolerance,
@@ -109,6 +110,7 @@ function newSessionFromTemplate(tpl: Template, rowCount = 5): Session {
     id: crypto.randomUUID(),
     partNo: tpl.partNo,
     name: tpl.name,
+    process: tpl.process,
     date: new Date().toISOString(),
     items,
     rows: Array.from({ length: rowCount }, () => emptyRow(items)),
@@ -550,23 +552,31 @@ async function loadSessionById(id: string): Promise<void> {
 function refreshPartSelect(): void {
   const tpls = listTemplates();
   els.partSelect.replaceChildren();
+  const curKey = templateKey(state.session);
   for (const t of tpls) {
     const opt = document.createElement('option');
-    opt.value = t.partNo;
-    opt.textContent = t.name ? `${t.partNo} (${t.name})` : t.partNo;
-    if (t.partNo === state.session.partNo) opt.selected = true;
+    opt.value = templateKey(t);
+    opt.textContent =
+      t.partNo +
+      (t.name ? ` / ${t.name}` : '') +
+      (t.process ? ` / ${t.process}` : '');
+    if (opt.value === curKey) opt.selected = true;
     els.partSelect.appendChild(opt);
   }
 }
 
 // ---------- テンプレ編集ダイアログ ----------
-function openTemplateEditor(partNo?: string): void {
-  const tpl: Template = partNo
-    ? getTemplate(partNo) ?? { partNo: '', items: [] }
+function openTemplateEditor(key?: string): void {
+  const existing = key ? getTemplate(key) : undefined;
+  const tpl: Template = existing
+    ? existing
     : { partNo: '', items: [{ id: crypto.randomUUID(), label: '', type: 'dimension', decimals: 2 }] };
+  // 編集元のキー（品番/品名/工程を変更して別物になった時に旧エントリを削除するため）
+  const originalKey = existing ? templateKey(existing) : undefined;
 
   ($('#tplPartNo') as HTMLInputElement).value = tpl.partNo;
   ($('#tplName') as HTMLInputElement).value = tpl.name ?? '';
+  ($('#tplProcess') as HTMLInputElement).value = tpl.process ?? '';
   const itemsTable = $('#tplItems') as HTMLTableElement;
 
   const renderItems = (items: MeasureItem[]) => {
@@ -649,15 +659,29 @@ function openTemplateEditor(partNo?: string): void {
       const newTpl: Template = {
         partNo: partNoVal,
         name: ($('#tplName') as HTMLInputElement).value.trim() || undefined,
+        process: ($('#tplProcess') as HTMLInputElement).value.trim() || undefined,
         items: collectItems().filter((i) => i.label !== ''),
       };
+      // 品番/品名/工程を編集してキーが変わった場合は旧エントリを削除
+      if (originalKey && originalKey !== templateKey(newTpl)) {
+        deleteTemplate(originalKey);
+      }
       saveTemplate(newTpl);
       refreshPartSelect();
       // 編集中の品番が現在のセッションなら反映を促す（新規測定で適用）
     } else if (action === 'delete') {
       const partNoVal = ($('#tplPartNo') as HTMLInputElement).value.trim();
-      if (partNoVal && confirm(`テンプレ「${partNoVal}」を削除しますか？`)) {
-        deleteTemplate(partNoVal);
+      const processVal = ($('#tplProcess') as HTMLInputElement).value.trim();
+      const delKey =
+        originalKey ??
+        templateKey({
+          partNo: partNoVal,
+          name: ($('#tplName') as HTMLInputElement).value.trim() || undefined,
+          process: processVal || undefined,
+        });
+      const disp = processVal ? `${partNoVal} / ${processVal}` : partNoVal;
+      if (partNoVal && confirm(`テンプレ「${disp}」を削除しますか？`)) {
+        deleteTemplate(delKey);
         refreshPartSelect();
       } else {
         e.preventDefault();
@@ -693,7 +717,7 @@ async function importTemplatesFromFile(file: File): Promise<void> {
     if (Object.keys(loadTemplates()).length > 0) {
       mode = confirm(
         '既存のテンプレートに「追記/上書き」しますか？\n' +
-          '［OK］追記（同一品番は上書き） ／ ［キャンセル］全置換'
+          '［OK］追記（品番・品名・工程が同じものは上書き） ／ ［キャンセル］全置換'
       )
         ? 'merge'
         : 'replace';
@@ -756,7 +780,9 @@ async function init(): Promise<void> {
   els.loadClose.addEventListener('click', () => els.loadDialog.close());
   els.partSelect.addEventListener('change', () => {
     // 選択しただけでは切替えない（新規測定ボタンで適用）。プレビュー用に通知。
-    els.voiceStatus.textContent = `「新規測定」で ${els.partSelect.value} を適用`;
+    const label =
+      els.partSelect.selectedOptions[0]?.textContent ?? '';
+    els.voiceStatus.textContent = `「新規測定」で ${label} を適用`;
   });
   els.tplBtn.addEventListener('click', () => openTemplateEditor(els.partSelect.value));
   els.tplExportBtn.addEventListener('click', exportTemplates);

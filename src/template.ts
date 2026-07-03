@@ -2,6 +2,14 @@ import type { Template, MeasureItem } from './types';
 
 const KEY = 'vms.templates';
 
+/** 複合キーの区切り（通常入力されない制御文字 U+241F / UNIT SEPARATOR） */
+const SEP = '␟';
+
+/** 品番＋品名＋工程からテンプレートの識別キーを生成する */
+export function templateKey(t: { partNo: string; name?: string; process?: string }): string {
+  return `${t.partNo}${SEP}${t.name ?? ''}${SEP}${t.process ?? ''}`;
+}
+
 /** 浮動小数の桁ノイズを抑える丸め */
 function round6(v: number): number {
   return Math.round(v * 1e6) / 1e6;
@@ -20,38 +28,52 @@ export function applyTolerance(item: MeasureItem): MeasureItem {
   };
 }
 
-/** 全テンプレートを読み込む（品番キーのマップ） */
+/**
+ * 全テンプレートを読み込む（複合キー 品番␟品名␟工程 のマップ）。
+ * 保存キーは無視して各値から再計算するため、旧形式（品番キー・工程なし）も
+ * 自動的に新キーへ移行される。
+ */
 export function loadTemplates(): Record<string, Template> {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return {};
     const obj = JSON.parse(raw) as Record<string, Template>;
-    return obj && typeof obj === 'object' ? obj : {};
+    if (!obj || typeof obj !== 'object') return {};
+    const map: Record<string, Template> = {};
+    for (const v of Object.values(obj)) {
+      if (v && typeof v === 'object' && typeof v.partNo === 'string') {
+        map[templateKey(v)] = v;
+      }
+    }
+    return map;
   } catch {
     return {};
   }
 }
 
 export function listTemplates(): Template[] {
-  return Object.values(loadTemplates()).sort((a, b) =>
-    a.partNo.localeCompare(b.partNo)
+  return Object.values(loadTemplates()).sort(
+    (a, b) =>
+      a.partNo.localeCompare(b.partNo) ||
+      (a.name ?? '').localeCompare(b.name ?? '') ||
+      (a.process ?? '').localeCompare(b.process ?? '')
   );
 }
 
-export function getTemplate(partNo: string): Template | undefined {
-  return loadTemplates()[partNo];
+export function getTemplate(key: string): Template | undefined {
+  return loadTemplates()[key];
 }
 
-/** テンプレートを保存（品番をキーに upsert） */
+/** テンプレートを保存（品番␟品名␟工程 をキーに upsert） */
 export function saveTemplate(tpl: Template): void {
   const all = loadTemplates();
-  all[tpl.partNo] = tpl;
+  all[templateKey(tpl)] = tpl;
   localStorage.setItem(KEY, JSON.stringify(all));
 }
 
-export function deleteTemplate(partNo: string): void {
+export function deleteTemplate(key: string): void {
   const all = loadTemplates();
-  delete all[partNo];
+  delete all[key];
   localStorage.setItem(KEY, JSON.stringify(all));
 }
 
@@ -103,6 +125,7 @@ function sanitizeTemplate(t: unknown): Template | null {
   return {
     partNo: o.partNo.trim(),
     name: typeof o.name === 'string' ? o.name : undefined,
+    process: typeof o.process === 'string' ? o.process : undefined,
     items,
   };
 }
@@ -110,7 +133,7 @@ function sanitizeTemplate(t: unknown): Template | null {
 /**
  * JSON文字列からテンプレートを取り込む。
  * 受理形式: {templates:[...]} / 配列 / 品番キーのマップ。
- * mode='merge'(既定): 既存に追記・同一品番は上書き / 'replace': 全置換。
+ * mode='merge'(既定): 既存に追記・品番+品名+工程が同一なら上書き / 'replace': 全置換。
  */
 export function importTemplatesJson(json: string, mode: 'merge' | 'replace' = 'merge'): ImportResult {
   const parsed = JSON.parse(json) as unknown;
@@ -134,9 +157,10 @@ export function importTemplatesJson(json: string, mode: 'merge' | 'replace' = 'm
   let added = 0;
   let updated = 0;
   for (const t of valid) {
-    if (store[t.partNo]) updated++;
+    const k = templateKey(t);
+    if (store[k]) updated++;
     else added++;
-    store[t.partNo] = t;
+    store[k] = t;
   }
   localStorage.setItem(KEY, JSON.stringify(store));
   return { added, updated, total: valid.length };

@@ -3,6 +3,9 @@ import {
   applyTolerance,
   saveTemplate,
   listTemplates,
+  loadTemplates,
+  getTemplate,
+  templateKey,
   exportTemplatesJson,
   importTemplatesJson,
 } from './template';
@@ -100,5 +103,44 @@ describe('テンプレJSON 書出/取込', () => {
   it('不正JSONは例外', () => {
     expect(() => importTemplatesJson('not json', 'merge')).toThrow();
     expect(() => importTemplatesJson('{}', 'merge')).toThrow();
+  });
+});
+
+describe('3要素キー（品番＋品名＋工程）', () => {
+  it('同一品番でも工程が違えば上書きされず共存する', () => {
+    saveTemplate({ partNo: 'P', name: '部品', process: '旋盤', items: [] });
+    saveTemplate({ partNo: 'P', name: '部品', process: '検査', items: [] });
+    const list = listTemplates();
+    expect(list).toHaveLength(2);
+    expect(new Set(list.map((t) => t.process))).toEqual(new Set(['旋盤', '検査']));
+  });
+
+  it('品番・品名・工程がすべて同じなら上書きする', () => {
+    saveTemplate({ partNo: 'P', name: '部品', process: '旋盤', items: [] });
+    saveTemplate({
+      partNo: 'P',
+      name: '部品',
+      process: '旋盤',
+      items: [applyTolerance({ id: 'a', label: '径', type: 'dimension', nominal: 5 })],
+    });
+    const list = listTemplates();
+    expect(list).toHaveLength(1);
+    expect(list[0].items).toHaveLength(1);
+  });
+
+  it('旧形式（工程なし・品番キー）データを自動移行して読める', () => {
+    // 旧レイアウト: localStorage に品番をキーにした工程なしテンプレを直接投入
+    localStorage.setItem(
+      'vms.templates',
+      JSON.stringify({ 'P-OLD': { partNo: 'P-OLD', name: '旧部品', items: [] } })
+    );
+    const list = listTemplates();
+    expect(list).toHaveLength(1);
+    expect(list[0].partNo).toBe('P-OLD');
+    // 複合キー（工程は空）で引ける
+    const t = getTemplate(templateKey({ partNo: 'P-OLD', name: '旧部品' }));
+    expect(t?.name).toBe('旧部品');
+    // 保存キーも新形式（複合キー）へ組み替わっている
+    expect(Object.keys(loadTemplates())[0]).toBe(templateKey({ partNo: 'P-OLD', name: '旧部品' }));
   });
 });
