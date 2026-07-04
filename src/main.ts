@@ -639,6 +639,9 @@ function openTemplateEditor(key?: string): void {
           : '';
       const upperTol = it.upperTol ?? derive(it.upper);
       const lowerTol = it.lowerTol ?? derive(it.lower);
+      // 保存した小数桁で整形し、末尾ゼロ(例 0.100)を保持して表示する
+      const fmt = (v: number | '') =>
+        v === '' || v == null ? '' : it.decimals != null ? v.toFixed(it.decimals) : String(v);
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td class="i-drag" title="ドラッグで並べ替え">⠿</td>
@@ -647,9 +650,9 @@ function openTemplateEditor(key?: string): void {
           <option value="dimension"${it.type === 'dimension' ? ' selected' : ''}>寸法</option>
           <option value="visual"${it.type === 'visual' ? ' selected' : ''}>目視</option>
         </select></td>
-        <td><input class="i-nominal num" value="${it.nominal ?? ''}" /></td>
-        <td><input class="i-upperTol num" value="${upperTol}" placeholder="+0.05" /></td>
-        <td><input class="i-lowerTol num" value="${lowerTol}" placeholder="-0.05" /></td>
+        <td><input class="i-nominal num" value="${fmt(it.nominal ?? '')}" /></td>
+        <td><input class="i-upperTol num" value="${fmt(upperTol)}" placeholder="+0.05" /></td>
+        <td><input class="i-lowerTol num" value="${fmt(lowerTol)}" placeholder="-0.05" /></td>
         <td><input class="i-unit unit" value="${esc(it.unit ?? '')}" /></td>
         <td><button type="button" class="i-del">×</button></td>`;
       // 行 tr を閉じ込めて直接削除（並べ替えで行番号がズレても正しい行を消す）
@@ -669,16 +672,25 @@ function openTemplateEditor(key?: string): void {
         | 'dimension'
         | 'visual';
       const numOrU = (v: string) => (v.trim() === '' ? undefined : Number(v));
+      const nominalStr = g('.i-nominal');
+      const upperStr = g('.i-upperTol');
+      const lowerStr = g('.i-lowerTol');
+      // 入力文字列の小数桁を桁数として保持（"0.100"→3）。Number化で失う末尾ゼロの意図を残す。
+      const decimals = Math.max(
+        decimalsOf(nominalStr),
+        decimalsOf(upperStr),
+        decimalsOf(lowerStr)
+      );
       // 基準値＋上下公差から上限/下限を自動計算
       return applyTolerance({
         id: crypto.randomUUID(),
         label: g('.i-label').trim(),
         type,
-        nominal: numOrU(g('.i-nominal')),
-        upperTol: numOrU(g('.i-upperTol')),
-        lowerTol: numOrU(g('.i-lowerTol')),
+        nominal: numOrU(nominalStr),
+        upperTol: numOrU(upperStr),
+        lowerTol: numOrU(lowerStr),
         unit: g('.i-unit').trim() || undefined,
-        decimals: 2,
+        decimals,
       } as MeasureItem);
     });
   };
@@ -740,6 +752,14 @@ function openTemplateEditor(key?: string): void {
 
 function esc(s: string): string {
   return s.replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+/** 数値文字列の小数桁数を数える（"0.100"→3, "10"→0, 空/非数→0）。 */
+function decimalsOf(s: string): number {
+  const t = s.trim();
+  if (t === '' || Number.isNaN(Number(t))) return 0;
+  const dot = t.indexOf('.');
+  return dot === -1 ? 0 : t.length - dot - 1;
 }
 
 /**

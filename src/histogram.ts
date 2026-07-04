@@ -18,30 +18,28 @@ function decimalPlaces(n: number): number {
 }
 
 /**
- * 公差の小数桁数からヒストグラムのビン幅を決める。
- * 例: 公差 ±0.05(2桁)→0.01 / ±0.005(3桁)→0.001 / ±0.1(1桁)→0.1。
- * 公差が無ければ基準値や上下限の桁、最後は decimals(既定2) にフォールバック。
+ * ヒストグラムのビン幅を小数桁数から決める。
+ * 桁数は decimals（テンプレ入力時に保持した公差の桁。"0.100"→3 も反映）を最優先。
+ * decimals が無い旧データは公差・上下限の桁から推定。例: ±0.05(2桁)→0.01 / ±0.1(1桁)→0.1。
  */
 export function binStepFor(item: MeasureItem): number {
-  const cands: number[] = [];
-  const push = (v?: number) => {
-    if (v != null && Number.isFinite(v)) cands.push(v);
-  };
-  const round6 = (v: number) => Math.round(v * 1e6) / 1e6; // 引き算の浮動小数ノイズ除去
-  push(item.upperTol);
-  push(item.lowerTol);
-  // 旧データ: 公差が無く上下限のみなら基準値との差から桁を推定
-  if (item.upperTol == null && item.upper != null && item.nominal != null)
-    push(round6(item.upper - item.nominal));
-  if (item.lowerTol == null && item.lower != null && item.nominal != null)
-    push(round6(item.lower - item.nominal));
   let dp: number;
-  if (cands.length > 0) {
-    dp = Math.max(...cands.map(decimalPlaces));
-  } else if (item.decimals != null) {
+  if (item.decimals != null) {
     dp = item.decimals;
   } else {
-    dp = 2;
+    // 旧データ向けフォールバック: 公差（無ければ上下限と基準値の差）の桁から推定
+    const cands: number[] = [];
+    const push = (v?: number) => {
+      if (v != null && Number.isFinite(v)) cands.push(v);
+    };
+    const round6 = (v: number) => Math.round(v * 1e6) / 1e6; // 引き算の浮動小数ノイズ除去
+    push(item.upperTol);
+    push(item.lowerTol);
+    if (item.upperTol == null && item.upper != null && item.nominal != null)
+      push(round6(item.upper - item.nominal));
+    if (item.lowerTol == null && item.lower != null && item.nominal != null)
+      push(round6(item.lower - item.nominal));
+    dp = cands.length > 0 ? Math.max(...cands.map(decimalPlaces)) : 2;
   }
   dp = Math.min(6, Math.max(0, dp)); // 過度な細分・浮動小数ノイズを抑制
   return 10 ** -dp;
