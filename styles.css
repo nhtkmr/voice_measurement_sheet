@@ -313,6 +313,20 @@ table.tpl-items input.i-label {
   width: 100%;
 }
 
+table.tpl-items td.i-drag {
+  cursor: grab;
+  touch-action: none; /* タッチ時にスクロールへ流さずドラッグを確実に成立させる */
+  text-align: center;
+  color: #aaa;
+  user-select: none;
+  width: 24px;
+}
+
+table.tpl-items tr.dragging {
+  opacity: 0.6;
+  background: var(--line);
+}
+
 .dialog-actions {
   display: flex;
   justify-content: flex-end;

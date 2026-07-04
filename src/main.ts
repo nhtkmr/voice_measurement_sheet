@@ -629,9 +629,9 @@ function openTemplateEditor(key?: string): void {
     itemsTable.replaceChildren();
     const head = document.createElement('tr');
     head.innerHTML =
-      '<th>項目名</th><th>種別</th><th>基準値</th><th>上公差</th><th>下公差</th><th>単位</th><th></th>';
+      '<th></th><th>項目名</th><th>種別</th><th>基準値</th><th>上公差</th><th>下公差</th><th>単位</th><th></th>';
     itemsTable.appendChild(head);
-    items.forEach((it, i) => {
+    items.forEach((it) => {
       // 旧データ(上限/下限のみ)も公差表示できるよう、必要なら基準値から導出
       const derive = (limit?: number) =>
         it.nominal != null && limit != null
@@ -641,6 +641,7 @@ function openTemplateEditor(key?: string): void {
       const lowerTol = it.lowerTol ?? derive(it.lower);
       const tr = document.createElement('tr');
       tr.innerHTML = `
+        <td class="i-drag" title="ドラッグで並べ替え">⠿</td>
         <td><input class="i-label" value="${esc(it.label)}" /></td>
         <td><select class="i-type">
           <option value="dimension"${it.type === 'dimension' ? ' selected' : ''}>寸法</option>
@@ -650,16 +651,14 @@ function openTemplateEditor(key?: string): void {
         <td><input class="i-upperTol num" value="${upperTol}" placeholder="+0.05" /></td>
         <td><input class="i-lowerTol num" value="${lowerTol}" placeholder="-0.05" /></td>
         <td><input class="i-unit unit" value="${esc(it.unit ?? '')}" /></td>
-        <td><button type="button" class="i-del" data-i="${i}">×</button></td>`;
+        <td><button type="button" class="i-del">×</button></td>`;
+      // 行 tr を閉じ込めて直接削除（並べ替えで行番号がズレても正しい行を消す）
+      tr.querySelector<HTMLButtonElement>('.i-del')!.addEventListener('click', () => {
+        tr.remove();
+      });
       itemsTable.appendChild(tr);
     });
-    itemsTable.querySelectorAll<HTMLButtonElement>('.i-del').forEach((b) =>
-      b.addEventListener('click', () => {
-        const cur = collectItems();
-        cur.splice(Number(b.dataset.i), 1);
-        renderItems(cur);
-      })
-    );
+    enableRowDrag(itemsTable);
   };
 
   const collectItems = (): MeasureItem[] => {
@@ -741,6 +740,52 @@ function openTemplateEditor(key?: string): void {
 
 function esc(s: string): string {
   return s.replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+/**
+ * テンプレ項目テーブルの行を、ハンドル(.i-drag)ドラッグで並べ替え可能にする。
+ * マウス/タッチ両対応のため Pointer Events を使用。DOM ノードごと移動するので
+ * 入力値は保持され、保存時に collectItems() が新しい順で読み取る。
+ */
+function enableRowDrag(table: HTMLTableElement): void {
+  table.querySelectorAll<HTMLTableCellElement>('.i-drag').forEach((handle) => {
+    handle.addEventListener('pointerdown', (e) => {
+      const row = handle.closest('tr');
+      if (!row) return;
+      e.preventDefault();
+      row.classList.add('dragging');
+
+      // move/up は window で受ける。掴んだ行を insertBefore で動かすとポインタ
+      // キャプチャが外れて pointermove が途切れるため、ハンドルには紐付けない。
+      const onMove = (ev: PointerEvent) => {
+        // ハンドルを持つデータ行のうち、掴んだ行以外を対象に挿入位置を決める
+        const rows = Array.from(
+          table.querySelectorAll<HTMLTableRowElement>('tr')
+        ).filter((r) => r !== row && r.querySelector('.i-drag'));
+        let inserted = false;
+        for (const r of rows) {
+          const rect = r.getBoundingClientRect();
+          if (ev.clientY < rect.top + rect.height / 2) {
+            table.insertBefore(row, r);
+            inserted = true;
+            break;
+          }
+        }
+        if (!inserted) table.appendChild(row); // 末尾より下なら最後尾へ
+      };
+
+      const onUp = () => {
+        row.classList.remove('dragging');
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+      };
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+    });
+  });
 }
 
 // ---------- テンプレ JSON 書出/取込 ----------
