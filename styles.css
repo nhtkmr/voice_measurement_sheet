@@ -260,6 +260,7 @@ table.grid .tol {
 canvas.hist {
   margin-top: 6px;
   width: 100%;
+  max-width: 240px; /* 描画解像度(240px)を上限に。過度な引き伸ばしとぼやけを防ぐ */
   height: auto;
   background: #fafcff;
   border: 1px solid #eef;

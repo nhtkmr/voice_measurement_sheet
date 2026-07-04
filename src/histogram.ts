@@ -1,5 +1,52 @@
 import type { MeasureItem, Row } from './types';
 
+/** 数値の小数桁数を返す（指数表記も考慮）。整数や非数は0。 */
+function decimalPlaces(n: number): number {
+  if (!Number.isFinite(n) || Number.isInteger(n)) return 0;
+  const s = Math.abs(n).toString();
+  const e = s.indexOf('e');
+  if (e !== -1) {
+    // 例: "1e-7" / "1.2e-7"
+    const mant = s.slice(0, e);
+    const dot = mant.indexOf('.');
+    const mantDec = dot === -1 ? 0 : mant.length - dot - 1;
+    const exp = Number(s.slice(e + 1));
+    return Math.max(0, mantDec - exp);
+  }
+  const dot = s.indexOf('.');
+  return dot === -1 ? 0 : s.length - dot - 1;
+}
+
+/**
+ * 公差の小数桁数からヒストグラムのビン幅を決める。
+ * 例: 公差 ±0.05(2桁)→0.01 / ±0.005(3桁)→0.001 / ±0.1(1桁)→0.1。
+ * 公差が無ければ基準値や上下限の桁、最後は decimals(既定2) にフォールバック。
+ */
+export function binStepFor(item: MeasureItem): number {
+  const cands: number[] = [];
+  const push = (v?: number) => {
+    if (v != null && Number.isFinite(v)) cands.push(v);
+  };
+  const round6 = (v: number) => Math.round(v * 1e6) / 1e6; // 引き算の浮動小数ノイズ除去
+  push(item.upperTol);
+  push(item.lowerTol);
+  // 旧データ: 公差が無く上下限のみなら基準値との差から桁を推定
+  if (item.upperTol == null && item.upper != null && item.nominal != null)
+    push(round6(item.upper - item.nominal));
+  if (item.lowerTol == null && item.lower != null && item.nominal != null)
+    push(round6(item.lower - item.nominal));
+  let dp: number;
+  if (cands.length > 0) {
+    dp = Math.max(...cands.map(decimalPlaces));
+  } else if (item.decimals != null) {
+    dp = item.decimals;
+  } else {
+    dp = 2;
+  }
+  dp = Math.min(6, Math.max(0, dp)); // 過度な細分・浮動小数ノイズを抑制
+  return 10 ** -dp;
+}
+
 /** 列の値からヒストグラムをcanvasに描画し、規格線(LSL/USL)を重ねる。 */
 export function drawHistogram(
   canvas: HTMLCanvasElement,
@@ -37,7 +84,14 @@ export function drawHistogram(
   lo -= pad;
   hi += pad;
 
-  const bins = Math.min(10, Math.max(4, Math.ceil(Math.sqrt(values.length))));
+  // 公差の桁からビン幅を決め、境界をそのグリッドに整列させる。
+  // 範囲が極端に広い場合のみ、棒が潰れないよう自動でビン幅を粗くする（上限本数で制御）。
+  const STEP = binStepFor(item);
+  const MAX_BINS = 300;
+  lo = Math.floor(lo / STEP) * STEP;
+  hi = Math.ceil(hi / STEP) * STEP;
+  let bins = Math.max(1, Math.round((hi - lo) / STEP));
+  if (bins > MAX_BINS) bins = MAX_BINS; // フォールバック（ビン幅が公差桁より広くなる）
   const counts = new Array(bins).fill(0);
   const binW = (hi - lo) / bins;
   for (const v of values) {
@@ -53,9 +107,11 @@ export function drawHistogram(
 
   // バー
   ctx.fillStyle = '#4a90d9';
+  const cell = W / bins;
+  const bw = cell > 3 ? cell - 1 : Math.max(1, cell); // 細いビンでも最低1pxは描く
   for (let i = 0; i < bins; i++) {
+    if (counts[i] === 0) continue;
     const bx = (i / bins) * W;
-    const bw = W / bins - 1;
     const bh = (counts[i] / maxCount) * (plotH - 4);
     ctx.fillRect(bx, plotH - bh, bw, bh);
   }
