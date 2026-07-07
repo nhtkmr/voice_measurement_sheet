@@ -39,6 +39,8 @@ import {
   setAdvanceDir,
   getSlowInput,
   setSlowInput,
+  getShowHistogram,
+  setShowHistogram,
   type AdvanceDir,
 } from './settings';
 
@@ -73,6 +75,7 @@ const els = {
   tplFile: $('#tplFile') as HTMLInputElement,
   ngVoiceChk: $('#ngVoiceChk') as HTMLInputElement,
   slowInputChk: $('#slowInputChk') as HTMLInputElement,
+  histChk: $('#histChk') as HTMLInputElement,
   rowCount: $('#rowCount') as HTMLInputElement,
   advanceDir: $('#advanceDir') as HTMLSelectElement,
   voiceBtn: $('#voiceBtn') as HTMLButtonElement,
@@ -164,12 +167,14 @@ function renderStats(): void {
         <span>NG</span><b>${s.ngCount}</b>`;
       card.appendChild(grid);
 
-      const canvas = document.createElement('canvas');
-      canvas.width = 240;
-      canvas.height = 90;
-      canvas.className = 'hist';
-      card.appendChild(canvas);
-      drawHistogram(canvas, it, rows, c);
+      if (getShowHistogram()) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 240;
+        canvas.height = 90;
+        canvas.className = 'hist';
+        card.appendChild(canvas);
+        drawHistogram(canvas, it, rows, c);
+      }
     } else {
       let ng = 0;
       let ok = 0;
@@ -1005,6 +1010,11 @@ async function init(): Promise<void> {
   els.slowInputChk.addEventListener('change', () => {
     setSlowInput(els.slowInputChk.checked);
     resetPending(); // モード切替時に未確定バッファをクリア
+  });
+  els.histChk.checked = getShowHistogram();
+  els.histChk.addEventListener('change', () => {
+    setShowHistogram(els.histChk.checked);
+    render(); // グラフの表示/非表示を即反映
   });
   els.exportBtn.addEventListener('click', () => exportSession(state.session));
 

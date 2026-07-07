@@ -6,6 +6,8 @@ import {
   setAdvanceDir,
   getSlowInput,
   setSlowInput,
+  getShowHistogram,
+  setShowHistogram,
 } from './settings';
 
 beforeEach(() => {
@@ -39,6 +41,18 @@ describe('ゆっくり入力設定', () => {
     expect(getSlowInput()).toBe(true);
     setSlowInput(false);
     expect(getSlowInput()).toBe(false);
+  });
+});
+
+describe('ヒストグラム表示設定', () => {
+  it('既定は表示', () => {
+    expect(getShowHistogram()).toBe(true);
+  });
+  it('非表示を保存して読み出せる', () => {
+    setShowHistogram(false);
+    expect(getShowHistogram()).toBe(false);
+    setShowHistogram(true);
+    expect(getShowHistogram()).toBe(true);
   });
 });
 

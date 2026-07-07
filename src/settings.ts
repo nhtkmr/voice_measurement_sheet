@@ -3,6 +3,7 @@
 const NG_VOICE_KEY = 'vms.ngVoice';
 const ADVANCE_DIR_KEY = 'vms.advanceDir';
 const SLOW_INPUT_KEY = 'vms.slowInput';
+const SHOW_HIST_KEY = 'vms.showHistogram';
 
 /** NG時の「NGです」音声読み上げが有効か（既定: 有効） */
 export function getNgVoice(): boolean {
@@ -31,4 +32,13 @@ export function getSlowInput(): boolean {
 
 export function setSlowInput(enabled: boolean): void {
   localStorage.setItem(SLOW_INPUT_KEY, enabled ? '1' : '0');
+}
+
+/** 工程能力のヒストグラム(グラフ)表示（既定: 表示） */
+export function getShowHistogram(): boolean {
+  return localStorage.getItem(SHOW_HIST_KEY) !== '0';
+}
+
+export function setShowHistogram(enabled: boolean): void {
+  localStorage.setItem(SHOW_HIST_KEY, enabled ? '1' : '0');
 }
