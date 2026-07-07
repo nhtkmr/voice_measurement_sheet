@@ -1,4 +1,6 @@
-import type { Template, Session, MeasureItem, Row } from './types';
+import type { Template, Session, MeasureItem, Row, ItemType, AngleFormat } from './types';
+import { isNumericItem } from './types';
+import { parseAngle, formatAngle, dmsToDeg, degToDms } from './angle';
 import {
   listTemplates,
   getTemplate,
@@ -144,13 +146,18 @@ function renderStats(): void {
     title.textContent = it.label;
     card.appendChild(title);
 
-    if (it.type === 'dimension') {
+    if (isNumericItem(it.type)) {
       const s = columnStats(it, rows, c);
+      // 角度は平均を表示形式(小数°/度分秒)に整形。σ/Cp/Cpk は数値のまま(度)。
+      const meanDisp =
+        it.type === 'angle' && s.mean != null
+          ? formatAngle(s.mean, it.angleFormat ?? 'decimal')
+          : fmt(s.mean);
       const grid = document.createElement('div');
       grid.className = 'stat-grid';
       grid.innerHTML = `
         <span>n</span><b>${s.n}</b>
-        <span>平均</span><b>${fmt(s.mean)}</b>
+        <span>平均</span><b>${meanDisp}</b>
         <span>σ</span><b>${fmt(s.sigma, 4)}</b>
         <span>Cp</span><b>${fmt(s.cp, 2)}</b>
         <span>Cpk</span><b style="color:${cpkLevelColor(s.cpk)}">${fmt(s.cpk, 2)}</b>
@@ -194,14 +201,15 @@ function setValue(row: number, col: number, raw: string): void {
     r.values[col] = null;
     r.judgments[col] = null;
   } else {
-    const num = parseNumber(trimmed);
+    // 角度は度分秒/小数を解釈して10進度へ、それ以外は通常の数値解釈
+    const num = item.type === 'angle' ? parseAngle(trimmed) : parseNumber(trimmed);
     if (num == null) {
       // 解釈不可: 表示だけ戻す
       render();
       return;
     }
     r.values[col] = num;
-    if (item.type === 'dimension') {
+    if (isNumericItem(item.type)) {
       const j = judgeDimension(item, num);
       r.judgments[col] = j;
       if (j === 'NG') announceNG();
@@ -334,9 +342,9 @@ function handleVoiceFinal(text: string): void {
     return;
   }
 
-  // 数値として解釈（寸法セルのみ）
-  if (item.type === 'dimension') {
-    const num = parseNumber(text);
+  // 数値として解釈（寸法・角度セル）。角度は度分秒/小数を解釈。
+  if (isNumericItem(item.type)) {
+    const num = item.type === 'angle' ? parseAngle(text) : parseNumber(text);
     if (num != null) {
       setValue(row, col, String(num));
       // NGは測り直しのため進めず、その場に留める
@@ -367,8 +375,8 @@ function commitPending(force: boolean): void {
   els.transcript.textContent = text;
   const { row, col } = state.active;
   const item = state.session.items[col];
-  if (text !== '' && item.type === 'dimension') {
-    const num = parseNumber(text);
+  if (text !== '' && isNumericItem(item.type)) {
+    const num = item.type === 'angle' ? parseAngle(text) : parseNumber(text);
     if (num != null) {
       setValue(row, col, String(num)); // 既存: 判定・NG音・描画・autosave込み
       // NGは測り直しのため進めず、その場に留める
@@ -642,23 +650,77 @@ function openTemplateEditor(key?: string): void {
       // 保存した小数桁で整形し、末尾ゼロ(例 0.100)を保持して表示する
       const fmt = (v: number | '') =>
         v === '' || v == null ? '' : it.decimals != null ? v.toFixed(it.decimals) : String(v);
+
+      const isAngle = it.type === 'angle';
+      const af: AngleFormat = it.angleFormat ?? 'decimal';
+      const isDms = isAngle && af === 'dms';
+
+      // 種別セル（角度なら形式セレクトも表示）
+      const typeCell = `<td>
+        <select class="i-type">
+          <option value="dimension"${it.type === 'dimension' ? ' selected' : ''}>寸法</option>
+          <option value="visual"${it.type === 'visual' ? ' selected' : ''}>目視</option>
+          <option value="angle"${it.type === 'angle' ? ' selected' : ''}>角度</option>
+        </select>
+        <select class="i-aformat"${isAngle ? '' : ' hidden'}>
+          <option value="decimal"${af === 'decimal' ? ' selected' : ''}>小数°</option>
+          <option value="dms"${af === 'dms' ? ' selected' : ''}>度分秒</option>
+        </select>
+      </td>`;
+
+      // 基準値・公差セル（度分秒は度/分/秒の別欄で基準値/上公差/下公差、それ以外は数値欄）
+      let specCells: string;
+      if (isDms) {
+        const nom = it.nominal != null ? degToDms(it.nominal) : null;
+        const utol = it.upperTol != null ? degToDms(Math.abs(it.upperTol)) : null;
+        const ltol = it.lowerTol != null ? degToDms(Math.abs(it.lowerTol)) : null;
+        const v = (n?: number) => (n == null ? '' : String(n));
+        specCells = `
+          <td><span class="dms">
+            <input class="i-nom-d numxs" value="${v(nom?.d)}" placeholder="度" />°
+            <input class="i-nom-m numxs" value="${v(nom?.m)}" placeholder="分" />'
+            <input class="i-nom-s numxs" value="${v(nom?.s)}" placeholder="秒" />"
+          </span></td>
+          <td>+<span class="dms">
+            <input class="i-utol-d numxs" value="${v(utol?.d)}" />°
+            <input class="i-utol-m numxs" value="${v(utol?.m)}" />'
+            <input class="i-utol-s numxs" value="${v(utol?.s)}" />"
+          </span></td>
+          <td>−<span class="dms">
+            <input class="i-ltol-d numxs" value="${v(ltol?.d)}" />°
+            <input class="i-ltol-m numxs" value="${v(ltol?.m)}" />'
+            <input class="i-ltol-s numxs" value="${v(ltol?.s)}" />"
+          </span></td>`;
+      } else {
+        specCells = `
+          <td><input class="i-nominal num" value="${fmt(it.nominal ?? '')}" /></td>
+          <td><input class="i-upperTol num" value="${fmt(upperTol)}" placeholder="+0.05" /></td>
+          <td><input class="i-lowerTol num" value="${fmt(lowerTol)}" placeholder="-0.05" /></td>`;
+      }
+
+      const unitCell = isAngle
+        ? `<td><input class="i-unit unit" value="°" readonly /></td>`
+        : `<td><input class="i-unit unit" value="${esc(it.unit ?? '')}" /></td>`;
+
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td class="i-drag" title="ドラッグで並べ替え">⠿</td>
         <td><input class="i-label" value="${esc(it.label)}" /></td>
-        <td><select class="i-type">
-          <option value="dimension"${it.type === 'dimension' ? ' selected' : ''}>寸法</option>
-          <option value="visual"${it.type === 'visual' ? ' selected' : ''}>目視</option>
-        </select></td>
-        <td><input class="i-nominal num" value="${fmt(it.nominal ?? '')}" /></td>
-        <td><input class="i-upperTol num" value="${fmt(upperTol)}" placeholder="+0.05" /></td>
-        <td><input class="i-lowerTol num" value="${fmt(lowerTol)}" placeholder="-0.05" /></td>
-        <td><input class="i-unit unit" value="${esc(it.unit ?? '')}" /></td>
+        ${typeCell}
+        ${specCells}
+        ${unitCell}
         <td><button type="button" class="i-del">×</button></td>`;
       // 行 tr を閉じ込めて直接削除（並べ替えで行番号がズレても正しい行を消す）
       tr.querySelector<HTMLButtonElement>('.i-del')!.addEventListener('click', () => {
         tr.remove();
       });
+      // 種別/形式を変えたら、現在値を保持したまま欄構成を再描画
+      tr.querySelector<HTMLSelectElement>('.i-type')!.addEventListener('change', () =>
+        renderItems(collectItems())
+      );
+      tr.querySelector<HTMLSelectElement>('.i-aformat')?.addEventListener('change', () =>
+        renderItems(collectItems())
+      );
       itemsTable.appendChild(tr);
     });
     enableRowDrag(itemsTable);
@@ -668,29 +730,52 @@ function openTemplateEditor(key?: string): void {
     const rows = Array.from(itemsTable.querySelectorAll('tr')).slice(1);
     return rows.map((tr) => {
       const g = (s: string) => (tr.querySelector(s) as HTMLInputElement)?.value ?? '';
-      const type = (tr.querySelector('.i-type') as HTMLSelectElement).value as
-        | 'dimension'
-        | 'visual';
+      const type = (tr.querySelector('.i-type') as HTMLSelectElement).value as ItemType;
       const numOrU = (v: string) => (v.trim() === '' ? undefined : Number(v));
-      const nominalStr = g('.i-nominal');
-      const upperStr = g('.i-upperTol');
-      const lowerStr = g('.i-lowerTol');
-      // 入力文字列の小数桁を桁数として保持（"0.100"→3）。Number化で失う末尾ゼロの意図を残す。
-      const decimals = Math.max(
-        decimalsOf(nominalStr),
-        decimalsOf(upperStr),
-        decimalsOf(lowerStr)
-      );
+
+      let nominal: number | undefined;
+      let upperTol: number | undefined;
+      let lowerTol: number | undefined;
+      let decimals: number | undefined;
+      // 現在DOMにある欄で判定（種別切替の途中でも値を失わない）
+      if (tr.querySelector('.i-nom-d')) {
+        const n = (s: string) => Number(g(s) || 0);
+        const hasNom = ['.i-nom-d', '.i-nom-m', '.i-nom-s'].some((s) => g(s).trim() !== '');
+        nominal = hasNom ? dmsToDeg(n('.i-nom-d'), n('.i-nom-m'), n('.i-nom-s')) : undefined;
+        // 上公差は＋側、下公差は−側の大きさ（度分秒）。空欄側は未設定。
+        const hasU = ['.i-utol-d', '.i-utol-m', '.i-utol-s'].some((s) => g(s).trim() !== '');
+        const hasL = ['.i-ltol-d', '.i-ltol-m', '.i-ltol-s'].some((s) => g(s).trim() !== '');
+        upperTol = hasU ? dmsToDeg(n('.i-utol-d'), n('.i-utol-m'), n('.i-utol-s')) : undefined;
+        lowerTol = hasL ? -dmsToDeg(n('.i-ltol-d'), n('.i-ltol-m'), n('.i-ltol-s')) : undefined;
+      } else {
+        const nominalStr = g('.i-nominal');
+        const upperStr = g('.i-upperTol');
+        const lowerStr = g('.i-lowerTol');
+        nominal = numOrU(nominalStr);
+        upperTol = numOrU(upperStr);
+        lowerTol = numOrU(lowerStr);
+        // 入力文字列の小数桁を桁数として保持（"0.100"→3）
+        decimals = Math.max(
+          decimalsOf(nominalStr),
+          decimalsOf(upperStr),
+          decimalsOf(lowerStr)
+        );
+      }
+      const angleFormat =
+        type === 'angle'
+          ? (((tr.querySelector('.i-aformat') as HTMLSelectElement)?.value ?? 'decimal') as AngleFormat)
+          : undefined;
       // 基準値＋上下公差から上限/下限を自動計算
       return applyTolerance({
         id: crypto.randomUUID(),
         label: g('.i-label').trim(),
         type,
-        nominal: numOrU(nominalStr),
-        upperTol: numOrU(upperStr),
-        lowerTol: numOrU(lowerStr),
-        unit: g('.i-unit').trim() || undefined,
+        nominal,
+        upperTol,
+        lowerTol,
+        unit: type === 'angle' ? '°' : g('.i-unit').trim() || undefined,
         decimals,
+        angleFormat,
       } as MeasureItem);
     });
   };

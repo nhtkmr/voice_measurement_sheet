@@ -1,5 +1,14 @@
-import type { Session } from './types';
+import type { Session, MeasureItem } from './types';
+import { isNumericItem } from './types';
 import { toleranceLabel } from './format';
+import { formatAngle } from './angle';
+
+/** 保存値(数値)をセル表示用文字列にする。角度は形式に整形、寸法はそのまま。 */
+export function displayValue(it: MeasureItem, v: number | null): string {
+  if (v == null || Number.isNaN(v)) return '';
+  if (it.type === 'angle') return formatAngle(v, it.angleFormat ?? 'decimal', it.decimals ?? 3);
+  return String(v);
+}
 
 export interface GridCallbacks {
   onValueInput: (row: number, col: number, raw: string) => void;
@@ -57,11 +66,11 @@ export function renderGrid(
       // 値セル
       const vtd = document.createElement('td');
       vtd.className = 'valcell';
-      if (it.type === 'dimension') {
+      if (isNumericItem(it.type)) {
         const input = document.createElement('input');
         input.type = 'text';
-        input.inputMode = 'decimal';
-        input.value = row.values[c] != null ? String(row.values[c]) : '';
+        input.inputMode = it.type === 'angle' && it.angleFormat === 'dms' ? 'text' : 'decimal';
+        input.value = displayValue(it, row.values[c]);
         input.dataset.row = String(r);
         input.dataset.col = String(c);
         if (active.row === r && active.col === c) input.classList.add('active');

@@ -314,6 +314,29 @@ table.tpl-items input.i-label {
   width: 100%;
 }
 
+/* 角度: 度分秒の小さな入力欄と形式セレクト */
+table.tpl-items .dms {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  white-space: nowrap;
+}
+
+table.tpl-items input.numxs {
+  width: 30px;
+  text-align: right;
+}
+
+table.tpl-items select.i-aformat {
+  margin-top: 3px;
+  width: 100%;
+  font-size: 12px;
+}
+
+table.tpl-items select.i-aformat[hidden] {
+  display: none;
+}
+
 table.tpl-items td.i-drag {
   cursor: grab;
   touch-action: none; /* タッチ時にスクロールへ流さずドラッグを確実に成立させる */

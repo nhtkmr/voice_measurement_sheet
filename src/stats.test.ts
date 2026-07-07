@@ -33,6 +33,12 @@ describe('judgeDimension', () => {
   it('境界はOK', () => {
     expect(judgeDimension(item, 10.05)).toBe('OK');
   });
+  it('角度(type=angle)も内部値(10進度)で寸法と同じく判定される', () => {
+    // 45° ±0.01° → 下限44.99 / 上限45.01
+    const ang: MeasureItem = { id: 'a', label: '角', type: 'angle', lower: 44.99, upper: 45.01 };
+    expect(judgeDimension(ang, 45.0)).toBe('OK');
+    expect(judgeDimension(ang, 45.02)).toBe('NG');
+  });
 });
 
 describe('columnStats Cp/Cpk', () => {

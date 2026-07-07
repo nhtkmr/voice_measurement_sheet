@@ -1,4 +1,5 @@
-import type { Template, MeasureItem } from './types';
+import type { Template, MeasureItem, ItemType } from './types';
+import { isNumericItem } from './types';
 
 const KEY = 'vms.templates';
 
@@ -107,7 +108,8 @@ function sanitizeTemplate(t: unknown): Template | null {
       if (!raw || typeof raw !== 'object') return null;
       const r = raw as Record<string, unknown>;
       if (typeof r.label !== 'string') return null;
-      const type = r.type === 'visual' ? 'visual' : 'dimension';
+      const type: ItemType =
+        r.type === 'visual' ? 'visual' : r.type === 'angle' ? 'angle' : 'dimension';
       const num = (v: unknown) => (typeof v === 'number' && !Number.isNaN(v) ? v : undefined);
       const item: MeasureItem = {
         id: typeof r.id === 'string' ? r.id : crypto.randomUUID(),
@@ -116,10 +118,12 @@ function sanitizeTemplate(t: unknown): Template | null {
         nominal: num(r.nominal),
         upperTol: num(r.upperTol),
         lowerTol: num(r.lowerTol),
-        unit: typeof r.unit === 'string' ? r.unit : undefined,
+        unit: type === 'angle' ? '°' : typeof r.unit === 'string' ? r.unit : undefined,
         decimals: num(r.decimals),
+        angleFormat:
+          type === 'angle' ? (r.angleFormat === 'dms' ? 'dms' : 'decimal') : undefined,
       };
-      return type === 'dimension' ? applyTolerance(item) : item;
+      return isNumericItem(type) ? applyTolerance(item) : item;
     })
     .filter((i): i is MeasureItem => i !== null);
   return {

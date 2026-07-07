@@ -1,12 +1,20 @@
 // 共通の型定義
 
-export type ItemType = 'dimension' | 'visual';
+export type ItemType = 'dimension' | 'visual' | 'angle';
+
+/** 角度項目の表示形式（内部値は常に10進度） */
+export type AngleFormat = 'decimal' | 'dms';
+
+/** 数値として扱う項目か（寸法・角度）。目視は判定トグルのみ。 */
+export function isNumericItem(type: ItemType): boolean {
+  return type === 'dimension' || type === 'angle';
+}
 
 /** 測定項目（列定義） */
 export interface MeasureItem {
   id: string;
   label: string; // 例: "外径A"
-  type: ItemType; // 'dimension'=寸法 / 'visual'=目視（公差なし）
+  type: ItemType; // 'dimension'=寸法 / 'visual'=目視 / 'angle'=角度（内部は10進度）
   nominal?: number; // 基準値
   upperTol?: number; // 上公差（基準値からの符号付き偏差、例 +0.05）
   lowerTol?: number; // 下公差（基準値からの符号付き偏差、例 -0.05）
@@ -14,6 +22,7 @@ export interface MeasureItem {
   lower?: number; // 下限 (LSL) = nominal + lowerTol（公差から自動計算）
   unit?: string; // mm 等
   decimals?: number; // 表示桁
+  angleFormat?: AngleFormat; // type==='angle' のときの表示形式
 }
 
 /** 品番テンプレート */
