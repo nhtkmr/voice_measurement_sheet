@@ -59,4 +59,13 @@ describe('columnStats Cp/Cpk', () => {
     expect(s.cp).toBeCloseTo(2.828, 2);
     expect(s.cpk).toBeCloseTo(s.cp as number, 2);
   });
+
+  it('角度(type=angle)でも Cp/Cpk が算出される', () => {
+    const ang: MeasureItem = { id: 'a', label: '角', type: 'angle', lower: 4, upper: 16 };
+    const vals = [9, 10, 11, 10, 10];
+    const rows: Row[] = vals.map((v) => ({ values: [v], judgments: [judgeDimension(ang, v)] }));
+    const s = columnStats(ang, rows, 0);
+    expect(s.cp).toBeCloseTo(2.828, 2);
+    expect(s.cpk).not.toBeNull();
+  });
 });

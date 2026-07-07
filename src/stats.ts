@@ -1,4 +1,5 @@
 import type { MeasureItem, Row, ColumnStats } from './types';
+import { isNumericItem } from './types';
 
 /** 標本標準偏差 (n-1)。データ2点未満では null。 */
 export function sampleStdDev(values: number[]): number | null {
@@ -38,7 +39,7 @@ export function columnStats(item: MeasureItem, rows: Row[], colIndex: number): C
   let cp: number | null = null;
   let cpk: number | null = null;
 
-  if (sigma != null && sigma > 0 && m != null && item.type === 'dimension') {
+  if (sigma != null && sigma > 0 && m != null && isNumericItem(item.type)) {
     const usl = item.upper;
     const lsl = item.lower;
     if (usl != null && lsl != null) {
