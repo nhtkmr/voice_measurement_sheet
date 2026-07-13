@@ -1,0 +1,12 @@
+{
+  "name": "vms-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "工程能力測定シート 共有ストレージAPI (Azure Functions)",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@azure/cosmos": "^4.2.0"
+  }
+}

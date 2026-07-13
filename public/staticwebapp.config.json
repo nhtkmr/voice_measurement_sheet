@@ -14,7 +14,10 @@
   },
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/assets/*", "*.{css,js,json,webmanifest,png,svg,ico}"]
+    "exclude": ["/api/*", "/assets/*", "*.{css,js,json,webmanifest,png,svg,ico}"]
+  },
+  "platform": {
+    "apiRuntime": "node:20"
   },
   "globalHeaders": {
     "X-Content-Type-Options": "nosniff",
