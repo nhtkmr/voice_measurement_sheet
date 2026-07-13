@@ -70,6 +70,7 @@ const els = {
   loadDialog: $('#loadDialog') as HTMLDialogElement,
   loadList: $('#loadList') as HTMLElement,
   loadClose: $('#loadClose') as HTMLButtonElement,
+  tplNewBtn: $('#tplNewBtn') as HTMLButtonElement,
   tplBtn: $('#tplBtn') as HTMLButtonElement,
   tplExportBtn: $('#tplExportBtn') as HTMLButtonElement,
   tplImportBtn: $('#tplImportBtn') as HTMLButtonElement,
@@ -634,6 +635,12 @@ function openTemplateEditor(key?: string): void {
   // 編集元のキー（品番/品名/工程を変更して別物になった時に旧エントリを削除するため）
   const originalKey = existing ? templateKey(existing) : undefined;
 
+  // 新規作成/編集でタイトルと「削除」ボタンを出し分け
+  ($('#tplForm h2') as HTMLElement).textContent = existing
+    ? '品番テンプレート編集'
+    : '品番テンプレート新規作成';
+  ($('#tplDelete') as HTMLButtonElement).hidden = !existing;
+
   ($('#tplPartNo') as HTMLInputElement).value = tpl.partNo;
   ($('#tplName') as HTMLInputElement).value = tpl.name ?? '';
   ($('#tplProcess') as HTMLInputElement).value = tpl.process ?? '';
@@ -995,6 +1002,7 @@ async function init(): Promise<void> {
       els.partSelect.selectedOptions[0]?.textContent ?? '';
     els.voiceStatus.textContent = `「新規測定」で ${label} を適用`;
   });
+  els.tplNewBtn.addEventListener('click', () => openTemplateEditor());
   els.tplBtn.addEventListener('click', () => openTemplateEditor(els.partSelect.value));
   els.tplExportBtn.addEventListener('click', exportTemplates);
   els.tplImportBtn.addEventListener('click', () => els.tplFile.click());
