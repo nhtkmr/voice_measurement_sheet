@@ -41,6 +41,29 @@ body {
   margin: 0;
 }
 
+/* 用途別グループ: 行間を薄い区切り線で分ける */
+.topbar .row.group + .row.group {
+  border-top: 1px dashed var(--line);
+  padding-top: 6px;
+}
+
+/* 行の用途ラベル */
+.group-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #6b7785;
+  letter-spacing: 0.04em;
+}
+
+/* サブグループの縦区切り線 */
+.divider {
+  width: 1px;
+  align-self: stretch;
+  min-height: 20px;
+  background: var(--line);
+  margin: 0 4px;
+}
+
 .spacer {
   flex: 1;
 }
