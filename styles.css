@@ -156,6 +156,9 @@ main {
 
 .grid-wrap {
   overflow: auto;
+  /* グリッド領域を内部スクロールにして、見出し(sticky)を常時表示する。
+     ツールバー高さは --topbar-h(main. tsが実測して設定) を使う。 */
+  max-height: calc(100vh - var(--topbar-h, 130px) - 24px);
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -178,6 +181,15 @@ table.grid thead th {
   font-size: 13px;
   position: sticky;
   top: 0;
+  z-index: 2;
+  /* border-collapse 時に sticky で境界線が消えるのを box-shadow で補う */
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+
+/* 左上角セル(No.見出し)は縦横とも固定 */
+table.grid thead th:first-child {
+  left: 0;
+  z-index: 3;
 }
 
 table.grid .tol {
@@ -190,6 +202,11 @@ table.grid .tol {
   background: #f7f9fb;
   font-weight: 600;
   width: 36px;
+  /* 横スクロールしても行番号を左に固定 */
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  box-shadow: inset -1px 0 0 var(--line);
 }
 
 .valcell input {

@@ -1035,6 +1035,20 @@ async function init(): Promise<void> {
     els.voiceBtn.textContent = '🎤 音声非対応';
     els.voiceStatus.textContent = 'このブラウザは音声非対応(Edge/Chrome推奨)。手入力で利用可。';
   }
+
+  // ツールバー高さを CSS 変数へ反映（グリッドの固定ヘッダ用スクロール領域の高さ計算に使用）
+  syncTopbarHeight();
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(syncTopbarHeight).observe(document.querySelector('.topbar')!);
+  }
+  window.addEventListener('resize', syncTopbarHeight);
+}
+
+/** ツールバーの実測高さを --topbar-h に設定（折り返しで高さが変わるため追従） */
+function syncTopbarHeight(): void {
+  const bar = document.querySelector('.topbar') as HTMLElement | null;
+  if (!bar) return;
+  document.documentElement.style.setProperty('--topbar-h', `${bar.offsetHeight}px`);
 }
 
 void init();
