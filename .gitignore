@@ -19,3 +19,6 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+
+# Azure Functions ローカル設定（接続文字列などの秘密を含む）
+api/local.settings.json

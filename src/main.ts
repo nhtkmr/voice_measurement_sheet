@@ -12,6 +12,7 @@ import {
   applyTolerance,
   exportTemplatesJson,
   importTemplatesJson,
+  initTemplates,
 } from './template';
 import { renderGrid, type ActiveCell } from './grid';
 import { judgeDimension } from './judge';
@@ -933,13 +934,16 @@ async function importTemplatesFromFile(file: File): Promise<void> {
 
 // ---------- 初期化 ----------
 async function init(): Promise<void> {
+  // サーバー(共有)から全テンプレートを取得して端末キャッシュへ反映（失敗時はキャッシュのまま）
+  await initTemplates();
+
   state = {
     templates: loadTemplates(),
     session: null as unknown as Session,
     active: { row: 0, col: 0 },
   };
 
-  // テンプレが無ければサンプルを投入
+  // テンプレが無ければサンプルを投入（サーバーにも反映される）
   if (Object.keys(state.templates).length === 0) {
     saveTemplate(sampleTemplate());
     state.templates = loadTemplates();

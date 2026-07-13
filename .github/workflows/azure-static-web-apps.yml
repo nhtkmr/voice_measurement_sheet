@@ -32,6 +32,8 @@ jobs:
           # 無視され app_location が対象になるため、app_location に dist を指定する。
           app_location: "dist"
           skip_app_build: true
+          # 共有ストレージ API（Azure Functions）。Oryx が api/ を npm install してデプロイ。
+          api_location: "api"
 
   close_pull_request:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'

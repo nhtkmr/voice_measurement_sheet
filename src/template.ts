@@ -6,6 +6,58 @@ const KEY = 'vms.templates';
 /** 複合キーの区切り（通常入力されない制御文字 U+241F / UNIT SEPARATOR） */
 const SEP = '␟';
 
+// ---------- サーバー同期（Azure Functions /api/templates） ----------
+// localStorage を「端末キャッシュ」として使い、読み取りは同期のまま高速に返す。
+// 書き込みはキャッシュ更新後にサーバーへ非同期で反映（best-effort）。
+// テスト(node環境)ではネットワーク同期をスキップする。
+const API = '/api/templates';
+const canSync = (): boolean =>
+  typeof window !== 'undefined' && typeof fetch === 'function';
+
+async function apiUpsert(tpl: Template): Promise<void> {
+  if (!canSync()) return;
+  try {
+    const res = await fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(tpl),
+    });
+    if (!res.ok) throw new Error(`template upsert failed: ${res.status}`);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function apiDelete(key: string): Promise<void> {
+  if (!canSync()) return;
+  try {
+    const res = await fetch(`${API}/${encodeURIComponent(key)}`, { method: 'DELETE' });
+    if (!res.ok && res.status !== 404) throw new Error(`template delete failed: ${res.status}`);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+/**
+ * 起動時にサーバーから全テンプレートを取得し、端末キャッシュ(localStorage)へ反映する。
+ * 失敗時は既存キャッシュのまま続行する（アプリを止めない）。
+ */
+export async function initTemplates(): Promise<void> {
+  if (!canSync()) return;
+  try {
+    const res = await fetch(API);
+    if (!res.ok) throw new Error(`initTemplates failed: ${res.status}`);
+    const arr = (await res.json()) as Template[];
+    const map: Record<string, Template> = {};
+    for (const t of arr) {
+      if (t && typeof t.partNo === 'string') map[templateKey(t)] = t;
+    }
+    localStorage.setItem(KEY, JSON.stringify(map));
+  } catch (e) {
+    console.error(e);
+  }
+}
+
 /** 品番＋品名＋工程からテンプレートの識別キーを生成する */
 export function templateKey(t: { partNo: string; name?: string; process?: string }): string {
   return `${t.partNo}${SEP}${t.name ?? ''}${SEP}${t.process ?? ''}`;
@@ -65,17 +117,19 @@ export function getTemplate(key: string): Template | undefined {
   return loadTemplates()[key];
 }
 
-/** テンプレートを保存（品番␟品名␟工程 をキーに upsert） */
+/** テンプレートを保存（品番␟品名␟工程 をキーに upsert）。キャッシュ更新＋サーバー反映。 */
 export function saveTemplate(tpl: Template): void {
   const all = loadTemplates();
   all[templateKey(tpl)] = tpl;
   localStorage.setItem(KEY, JSON.stringify(all));
+  void apiUpsert(tpl);
 }
 
 export function deleteTemplate(key: string): void {
   const all = loadTemplates();
   delete all[key];
   localStorage.setItem(KEY, JSON.stringify(all));
+  void apiDelete(key);
 }
 
 // ---------- JSON 書き出し / 取り込み ----------
@@ -167,6 +221,10 @@ export function importTemplatesJson(json: string, mode: 'merge' | 'replace' = 'm
     store[k] = t;
   }
   localStorage.setItem(KEY, JSON.stringify(store));
+  // サーバーへ反映（best-effort）。replace でもサーバー側の削除は行わない簡易実装。
+  if (canSync()) {
+    for (const t of Object.values(store)) void apiUpsert(t);
+  }
   return { added, updated, total: valid.length };
 }
 
