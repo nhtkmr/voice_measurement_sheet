@@ -10,27 +10,25 @@
   </head>
   <body>
     <header class="topbar">
-      <div class="row">
+      <!-- 行1: テンプレート（品番の準備・管理） -->
+      <div class="row group">
         <h1>工程能力 音声測定シート</h1>
         <div class="spacer"></div>
         <label>テンプレート
           <select id="partSelect"></select>
         </label>
-        <button id="newBtn" type="button">新規測定</button>
-        <label>保存名<input id="fileName" type="text" placeholder="保存名" /></label>
-        <button id="saveBtn" type="button">途中保存</button>
-        <button id="loadBtn" type="button">読み込み</button>
         <button id="tplNewBtn" type="button">テンプレ新規</button>
         <button id="tplBtn" type="button">テンプレ編集</button>
+        <span class="divider"></span>
         <button id="tplExportBtn" type="button">テンプレ書出</button>
         <button id="tplImportBtn" type="button">テンプレ取込</button>
         <input id="tplFile" type="file" accept="application/json,.json" hidden />
       </div>
-      <div class="row">
-        <button id="voiceBtn" type="button" class="voice">🎤 音声開始</button>
-        <label class="toggle"><input type="checkbox" id="ngVoiceChk" /> NG音声</label>
-        <label class="toggle"><input type="checkbox" id="slowInputChk" /> ゆっくり入力</label>
-        <label class="toggle"><input type="checkbox" id="histChk" /> グラフ</label>
+
+      <!-- 行2: 測定（セッションの開始・保存） -->
+      <div class="row group">
+        <span class="group-label">測定</span>
+        <button id="newBtn" type="button">新規測定</button>
         <label class="num-field">本数 <input type="number" id="rowCount" min="1" max="999" value="5" /></label>
         <label class="num-field">進む方向
           <select id="advanceDir">
@@ -39,7 +37,20 @@
           </select>
         </label>
         <button id="addRowBtn" type="button">＋ 1本追加</button>
+        <span class="divider"></span>
+        <label>保存名<input id="fileName" type="text" placeholder="保存名" /></label>
+        <button id="saveBtn" type="button">途中保存</button>
+        <button id="loadBtn" type="button">読み込み</button>
         <button id="exportBtn" type="button">Excel出力</button>
+      </div>
+
+      <!-- 行3: 入力・音声 -->
+      <div class="row group">
+        <span class="group-label">入力・音声</span>
+        <button id="voiceBtn" type="button" class="voice">🎤 音声開始</button>
+        <label class="toggle"><input type="checkbox" id="ngVoiceChk" /> NG音声</label>
+        <label class="toggle"><input type="checkbox" id="slowInputChk" /> ゆっくり入力</label>
+        <label class="toggle"><input type="checkbox" id="histChk" /> グラフ</label>
         <div class="spacer"></div>
         <span id="voiceStatus" class="status">待機中</span>
         <span id="transcript" class="transcript"></span>
