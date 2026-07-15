@@ -133,7 +133,7 @@ az staticwebapp appsettings set --name vms-app \
 
 ---
 
-## 3. 他ホスティングへの移行について（AWS / GitHub Pages）
+## 3. 他ホスティングへの移行について（AWS 等）
 
 **現構成は Azure Functions + Cosmos DB に依存しているため、静的配信だけのホスティングでは動きません。**
 画面は開けますが `/api/*` が 404 になり、テンプレートが空になって測定データの保存が黙って失敗します。
@@ -149,8 +149,8 @@ az staticwebapp appsettings set --name vms-app \
 参考として、リポジトリには AWS Amplify 用の `amplify.yml`（`npm ci` → `npm run build`、`baseDirectory: dist`）が残っていますが、
 これは**静的部分のビルド設定のみ**で、上記のバックエンドは含みません。
 
-`.github/workflows/deploy.yml`（GitHub Pages）も同様に `dist/` だけを配信するため、
-**共有ストレージ化以降その前提を失っています**（§7 参照）。
+> かつて併存していた GitHub Pages 配信（`.github/workflows/deploy.yml`）は、まさにこの理由で機能しなくなったため廃止しました。
+> 静的配信だけのホスティングを追加する際は、同じ轍を踏まないよう API の移植までをセットで検討してください。
 
 ---
 
@@ -179,8 +179,6 @@ az staticwebapp appsettings set --name vms-app \
 - **データはチーム全員で共有**：ユーザーごとの分離はありません。誰でも他人の測定データを編集・削除できます。
 - **セッションの枝刈りが無い**：件数上限も TTL も無く、読み込みダイアログを開くたびに全件を取得します。
   長期運用で件数が増えると重くなります。
-- **GitHub Pages 用ワークフローが残っている**：`.github/workflows/deploy.yml` は `dist/` のみを配信するため、
-  現構成では API が無く保存が失敗します。SWA（`azure-static-web-apps.yml`）と併存しているので整理候補です。
 - **完全オフライン運用**：社内ネット遮断環境で音声を使うには、Web Speech API → Vosk 等オフラインエンジンへの差し替えが必要です（`src/voice/recognizer.ts` が差し替え可能な構造）。
   なお Service Worker が無いため、現状はインストールできてもオフラインでは動きません。
 

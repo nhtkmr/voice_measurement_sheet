@@ -669,7 +669,6 @@ npm run build   # tsc の型チェック + 本番ビルド
 
 - 単一論理パーティション（`partitionKey` が全件 `'shared'`）は共有要件に対する意図的な単純化だが、スケール上限がある。
 - **`manifest.webmanifest` の `icons[].src` が絶対パス `/icons/...`** で、`base: './'`（相対パス配置可）という設計意図と矛盾する。現在のルート配置では問題ないが、サブパスへ配置するとアイコンだけ404になる。
-- **`.github/workflows/deploy.yml`（GitHub Pages）が現構成では機能しない** — `dist/` のみを配信するため `/api/*` が404になり、テンプレもセッションも読めず保存も黙って失敗する。Azure SWA (`azure-static-web-apps.yml`) と併存しているが、Pages 側は共有ストレージ化以降その前提を失っている。
 
 ### コード品質
 
