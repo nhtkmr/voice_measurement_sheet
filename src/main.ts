@@ -649,6 +649,8 @@ function openTemplateEditor(key?: string): void {
   const renderItems = (items: MeasureItem[]) => {
     itemsTable.replaceChildren();
     const head = document.createElement('tr');
+    // 狭い画面ではカード表示に切り替わり見出し行を隠すため、CSS から選べるようにする
+    head.className = 'tpl-head';
     head.innerHTML =
       '<th></th><th>項目名</th><th>種別</th><th>基準値</th><th>上公差</th><th>下公差</th><th>単位</th><th></th>';
     itemsTable.appendChild(head);
@@ -669,7 +671,8 @@ function openTemplateEditor(key?: string): void {
       const isDms = isAngle && af === 'dms';
 
       // 種別セル（角度なら形式セレクトも表示）
-      const typeCell = `<td>
+      // data-label はカード表示時の見出し（styles.css の ::before が拾う）
+      const typeCell = `<td data-label="種別">
         <select class="i-type">
           <option value="dimension"${it.type === 'dimension' ? ' selected' : ''}>寸法</option>
           <option value="visual"${it.type === 'visual' ? ' selected' : ''}>目視</option>
@@ -689,36 +692,36 @@ function openTemplateEditor(key?: string): void {
         const ltol = it.lowerTol != null ? degToDms(Math.abs(it.lowerTol)) : null;
         const v = (n?: number) => (n == null ? '' : String(n));
         specCells = `
-          <td><span class="dms">
+          <td data-label="基準値"><span class="dms">
             <input class="i-nom-d numxs" value="${v(nom?.d)}" placeholder="度" />°
             <input class="i-nom-m numxs" value="${v(nom?.m)}" placeholder="分" />'
             <input class="i-nom-s numxs" value="${v(nom?.s)}" placeholder="秒" />"
           </span></td>
-          <td>+<span class="dms">
+          <td data-label="上公差">+<span class="dms">
             <input class="i-utol-d numxs" value="${v(utol?.d)}" />°
             <input class="i-utol-m numxs" value="${v(utol?.m)}" />'
             <input class="i-utol-s numxs" value="${v(utol?.s)}" />"
           </span></td>
-          <td>−<span class="dms">
+          <td data-label="下公差">−<span class="dms">
             <input class="i-ltol-d numxs" value="${v(ltol?.d)}" />°
             <input class="i-ltol-m numxs" value="${v(ltol?.m)}" />'
             <input class="i-ltol-s numxs" value="${v(ltol?.s)}" />"
           </span></td>`;
       } else {
         specCells = `
-          <td><input class="i-nominal num" value="${fmt(it.nominal ?? '')}" /></td>
-          <td><input class="i-upperTol num" value="${fmt(upperTol)}" placeholder="+0.05" /></td>
-          <td><input class="i-lowerTol num" value="${fmt(lowerTol)}" placeholder="-0.05" /></td>`;
+          <td data-label="基準値"><input class="i-nominal num" value="${fmt(it.nominal ?? '')}" /></td>
+          <td data-label="上公差"><input class="i-upperTol num" value="${fmt(upperTol)}" placeholder="+0.05" /></td>
+          <td data-label="下公差"><input class="i-lowerTol num" value="${fmt(lowerTol)}" placeholder="-0.05" /></td>`;
       }
 
       const unitCell = isAngle
-        ? `<td><input class="i-unit unit" value="°" readonly /></td>`
-        : `<td><input class="i-unit unit" value="${esc(it.unit ?? '')}" /></td>`;
+        ? `<td data-label="単位"><input class="i-unit unit" value="°" readonly /></td>`
+        : `<td data-label="単位"><input class="i-unit unit" value="${esc(it.unit ?? '')}" /></td>`;
 
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td class="i-drag" title="ドラッグで並べ替え">⠿</td>
-        <td><input class="i-label" value="${esc(it.label)}" /></td>
+        <td data-label="項目名"><input class="i-label" value="${esc(it.label)}" /></td>
         ${typeCell}
         ${specCells}
         ${unitCell}

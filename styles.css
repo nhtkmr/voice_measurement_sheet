@@ -313,6 +313,9 @@ canvas.hist {
   border-radius: 10px;
   padding: 18px;
   width: min(720px, 94vw);
+  /* 項目数が多いとダイアログが画面からはみ出すため、内部スクロールにする */
+  max-height: 90vh;
+  overflow: auto;
 }
 
 .tpl-dialog::backdrop {
@@ -389,6 +392,100 @@ table.tpl-items td.i-drag {
 table.tpl-items tr.dragging {
   opacity: 0.6;
   background: var(--line);
+}
+
+/* スマホ幅: 8列の表は固定幅セル(公差64px×3・単位48px等)だけで幅を使い切り、
+   唯一の可変列である項目名が潰れる。1項目=1カードに縦積みして回避する。
+   DOM 構造(table/tr/td)は変えずに display だけで組み替えるため、
+   collectItems() の行走査と enableRowDrag() の並べ替えはそのまま動く。 */
+@media (max-width: 600px) {
+  .tpl-dialog {
+    padding: 12px;
+  }
+
+  /* 品番/品名/工程 も flex-wrap 無しで潰れるので縦積みにする */
+  .tpl-dialog .field {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .tpl-dialog .field label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  table.tpl-items,
+  table.tpl-items tr,
+  table.tpl-items td {
+    display: block;
+  }
+
+  table.tpl-items .tpl-head {
+    display: none; /* 見出しは各セルの data-label で出す */
+  }
+
+  table.tpl-items tr {
+    position: relative; /* ⠿ と × をカード右上/左上に置くための基準 */
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 34px 8px 8px;
+    margin-bottom: 8px;
+  }
+
+  table.tpl-items td {
+    border: none;
+    padding: 3px 0;
+  }
+
+  table.tpl-items td[data-label] {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  table.tpl-items td[data-label]::before {
+    content: attr(data-label);
+    flex: none;
+    width: 4.5em;
+    font-size: 12px;
+    color: #777;
+  }
+
+  /* 固定幅を解除して指で押しやすい全幅の入力欄にする */
+  table.tpl-items input.num,
+  table.tpl-items input.unit {
+    width: auto;
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* 種別セル: 寸法/目視/角度 と 小数°/度分秒 を横並びに */
+  table.tpl-items select.i-aformat {
+    width: auto;
+    margin-top: 0;
+  }
+
+  /* iOS Safari は 16px 未満の入力欄でフォーカス時に自動ズームする */
+  table.tpl-items input,
+  table.tpl-items select {
+    font-size: 16px;
+  }
+
+  table.tpl-items td.i-drag {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: auto;
+    padding: 6px 12px; /* 指で掴めるタップ領域を確保 */
+  }
+
+  table.tpl-items td:last-child {
+    position: absolute;
+    top: 0;
+    right: 0;
+    padding: 2px;
+  }
 }
 
 .dialog-actions {
