@@ -17,6 +17,7 @@
         <label>テンプレート
           <select id="partSelect"></select>
         </label>
+        <span id="partSelectNote" class="status"></span>
         <button id="tplNewBtn" type="button">テンプレ新規</button>
         <button id="tplBtn" type="button">テンプレ編集</button>
         <span class="divider"></span>
@@ -27,7 +28,9 @@
 
       <!-- 行2: 測定（セッションの開始・保存） -->
       <div class="row group">
-        <span class="group-label">測定</span>
+        <span class="group-label">測定中</span>
+        <b id="sheetTemplate" class="sheet-template"></b>
+        <span class="divider"></span>
         <button id="newBtn" type="button">新規測定</button>
         <label class="num-field">本数 <input type="number" id="rowCount" min="1" max="999" value="5" /></label>
         <label class="num-field">進む方向

@@ -6,6 +6,7 @@ import {
   loadTemplates,
   getTemplate,
   templateKey,
+  templateLabel,
   exportTemplatesJson,
   importTemplatesJson,
 } from './template';
@@ -21,6 +22,33 @@ beforeEach(() => {
     removeItem: (k: string) => void store.delete(k),
     clear: () => store.clear(),
   };
+});
+
+describe('templateLabel', () => {
+  it('品番のみ', () => {
+    expect(templateLabel({ partNo: 'P-100' })).toBe('P-100');
+  });
+  it('品番＋品名', () => {
+    expect(templateLabel({ partNo: 'P-100', name: 'テスト部品' })).toBe('P-100 / テスト部品');
+  });
+  it('品番＋品名＋工程', () => {
+    expect(templateLabel({ partNo: 'P-100', name: 'テスト部品', process: '外径工程' })).toBe(
+      'P-100 / テスト部品 / 外径工程'
+    );
+  });
+  it('品名が無く工程だけある場合も欠落した区切りが残らない', () => {
+    expect(templateLabel({ partNo: 'P-100', process: '外径工程' })).toBe('P-100 / 外径工程');
+  });
+  it('空文字は未設定として扱う', () => {
+    expect(templateLabel({ partNo: 'P-100', name: '', process: '' })).toBe('P-100');
+  });
+  it('Session もそのまま渡せる（同じ3フィールドを持つため）', () => {
+    const session = {
+      id: 's1', partNo: 'P-200', name: '別部品', process: '仕上げ',
+      date: '2026-01-01T00:00:00.000Z', items: [], rows: [],
+    };
+    expect(templateLabel(session)).toBe('P-200 / 別部品 / 仕上げ');
+  });
 });
 
 describe('applyTolerance', () => {
