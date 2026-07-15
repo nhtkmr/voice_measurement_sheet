@@ -1,4 +1,4 @@
-# 開発仕様書 / プログラム仕様書
+﻿# 開発仕様書 / プログラム仕様書
 
 工程能力 音声測定シート（`voice-measurement-sheet`）の**内部設計書**。改修する開発者向けに、モジュール責務・データモデル・アルゴリズム・永続化スキーマを記述する。
 
@@ -580,13 +580,29 @@ const RETRY_MAX_MS = 30000;  // 指数バックオフの上限。回数は無制
 2. `state` を構築
 3. テンプレが0件なら `sampleTemplate()` を保存
 4. `getCurrentSessionId()` → `getSession(id)` でセッション復元。無ければ先頭テンプレから新規作成
-5. `refreshPartSelect()` / `render()`
+5. `syncTemplateUi()` / `render()`
 6. 保存ステータスの初期化 — 到達不可なら `offline`、復元できたなら（サーバから読めた＝保存済みなので）`saved`、新規作成したなら `doSave()` して結果を表示
 7. イベント配線、設定値をコントロールへ反映
-7. `isVoiceSupported()` が false なら音声ボタンを無効化し「手入力で利用可」と案内
-8. `syncTopbarHeight()` でツールバー実測高を CSS 変数 `--topbar-h` に設定（`ResizeObserver` + `resize` で追従）
+8. `isVoiceSupported()` が false なら音声ボタンを無効化し「手入力で利用可」と案内
+9. `syncTopbarHeight()` でツールバー実測高を CSS 変数 `--topbar-h` に設定（`ResizeObserver` + `resize` で追従）
 
-**品番セレクトを変えてもテンプレは切り替わらない**（案内を出すだけ）。適用は「新規測定」ボタンが `startNewSession()` で行う。測定中に誤ってシートを作り直さないための設計。
+### 9-7. テンプレートの表示（「測定中」と品番セレクトの分離）
+
+**品番セレクトを変えてもテンプレは切り替わらない。** 適用は「新規測定」ボタンが `startNewSession()` で行う。測定中に誤ってシートを作り直さないための設計。
+
+つまり**品番セレクトは「シートの状態」ではなく「次に新規測定／テンプレ編集で使う対象」**であり、両者は食い違いうる。かつては画面上にセッションのテンプレートが一切出ておらず（表示は読み込みダイアログと .xlsx 出力のみ）、セレクトが状態表示に見えて混乱の原因になっていた。そこで両者を分けている:
+
+| 表示 | 情報源 | 意味 |
+|---|---|---|
+| ツールバー行2「測定中 …」（`#sheetTemplate`） | **`state.session`** | 今のシートが使っているテンプレート。**常に正しい** |
+| 行1の品番セレクト（`#partSelect`） | `listTemplates()` | 次に新規測定／編集で使う対象 |
+| 行1の注記（`#partSelectNote`） | 両者の差 | 食い違っていれば「未適用（「新規測定」で適用）」 |
+
+同期は **`syncTemplateUi()` に集約**されており、内部で `syncSheetHeader()` と `syncPartSelectNote()` を呼ぶ。呼び出しは「セッションを差し替えたとき」と「テンプレ一覧が変わったとき」— `init` / `startNewSession` / `loadSessionById` / テンプレ保存・削除・取込。**`render()` からは呼ばない**（`render()` は入力のたびに走るが `getTemplate()` は localStorage を `JSON.parse` するため）。
+
+**テンプレート削除の検出**: 現セッションのキーに一致するテンプレが無い場合、`syncTemplateUi()` はセレクト先頭に `disabled` のプレースホルダ（`(削除済み) …`）を立てて選択する。これが無いとブラウザ既定で option 0 が選ばれ、**セレクトが無関係なテンプレートを指して詐称する**。「測定中」側にも「（削除済み）」を付けて警告色にする。
+
+なお `Session.items` はスナップショットなので（§4）、**テンプレートを編集しても開いているシートは古い公差で判定し続ける**。この検出は未実装（§13）。
 
 ---
 
@@ -659,13 +675,13 @@ const RETRY_MAX_MS = 30000;  // 指数バックオフの上限。回数は無制
 ## 12. テスト
 
 ```powershell
-npm test        # Vitest 76件
+npm test        # Vitest 82件
 npm run build   # tsc の型チェック + 本番ビルド
 ```
 
 | ファイル | 対象 |
 |---|---|
-| `template.test.ts` | 公差計算、複合キー、旧形式の自動移行、JSON往復、取込時の `upper` 再計算 |
+| `template.test.ts` | 公差計算、複合キー、`templateLabel()` の表示名組み立て、旧形式の自動移行、JSON往復、取込時の `upper` 再計算 |
 | `store.test.ts` | `fetch` をモックし、**成功/500/ネット断で `saveSession` の戻り値**、全量PUTであること、復帰後の再送、`vms.currentSessionId` の記録/削除 |
 | `settings.test.ts` | 4設定の既定値と往復 |
 | `stats.test.ts` | 平均/σ/Cp/Cpk と境界条件 |
@@ -694,6 +710,7 @@ npm run build   # tsc の型チェック + 本番ビルド
 
 - **取込 `mode: 'replace'` はサーバ側を削除しない**（コード中にも「簡易実装」と明記）。ローカルを全置換しても次回 `initTemplates()` でサーバから復活する。
 - `getSession()` / `listSessions()` の失敗は今も UI に出ない（`undefined` / `[]` を返すだけ）。読み込み一覧が「保存データはありません」と表示されたとき、**本当に無いのか通信できていないのかを区別できない**。保存側は §9-4 で解決済み。
+- **テンプレート編集の検出が無い** — `Session.items` はスナップショットのため、テンプレの公差を変更しても**開いているシートは古い公差で判定し続ける**。`Session` に版情報が無く、`state.session.items` と `getTemplate(...)?.items` を比較する処理も無い。削除の検出は §9-7 で入れたが、編集の検出は未実装。工程能力の測定器としては重要度が高い。
 - `listSessions()` は**全セッションを無制限に取得**する（`ORDER BY c.date DESC` の全件フェッチ）。TTL も件数上限も枝刈りも無いため、読み込みダイアログを開くたびに全件がメモリに載る。
 
 ### 構成

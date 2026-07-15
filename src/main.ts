@@ -7,6 +7,7 @@ import {
   saveTemplate,
   deleteTemplate,
   templateKey,
+  templateLabel,
   sampleTemplate,
   loadTemplates,
   applyTolerance,
@@ -62,6 +63,8 @@ const $ = <T extends HTMLElement>(sel: string) =>
 
 const els = {
   partSelect: $('#partSelect') as HTMLSelectElement,
+  partSelectNote: $('#partSelectNote') as HTMLElement,
+  sheetTemplate: $('#sheetTemplate') as HTMLElement,
   newBtn: $('#newBtn') as HTMLButtonElement,
   fileName: $('#fileName') as HTMLInputElement,
   saveBtn: $('#saveBtn') as HTMLButtonElement,
@@ -536,13 +539,18 @@ function sessionHasData(s: Session): boolean {
 /** 選択中の品番テンプレと本数で新規セッションを開始する。 */
 async function startNewSession(): Promise<void> {
   const tpl = getTemplate(els.partSelect.value);
-  if (!tpl) return;
+  if (!tpl) {
+    // 削除済みテンプレを選んだまま押した場合など。無言で何も起きないと原因が分からない
+    alert('テンプレートが見つかりません。一覧から選び直してください。');
+    return;
+  }
   const count = Math.max(1, Math.min(999, Math.floor(Number(els.rowCount.value) || 5)));
   cancelPendingSaves(); // 旧セッション宛の保存・再試行を残さない
   resetPending(); // 前測定の連結バッファ・タイマーが残らないように
   state.session = newSessionFromTemplate(tpl, count);
   state.active = { row: 0, col: 0 };
   syncFileNameField();
+  syncTemplateUi(); // 「測定中」表示と未適用注記を新セッションへ追従させる
   render();
   await doSave(); // 新セッションの保存もステータスに反映する
 }
@@ -623,7 +631,8 @@ async function openLoadDialog(): Promise<void> {
       info.className = 'load-info';
       info.innerHTML =
         `<b>${esc(s.label || defaultSaveName(s.date))}</b>` +
-        `<span>${esc(s.partNo)} / ${when} / ${s.rows.length}本 / NG ${ng}${editing}</span>`;
+        // 品番だけだと工程違いのテンプレを見分けられないので表示名を使う
+        `<span>${esc(templateLabel(s))} / ${when} / ${s.rows.length}本 / NG ${ng}${editing}</span>`;
 
       const openBtn = document.createElement('button');
       openBtn.type = 'button';
@@ -663,25 +672,61 @@ async function loadSessionById(id: string): Promise<void> {
   state.active = { row: 0, col: 0 };
   els.loadDialog.close();
   syncFileNameField();
+  syncTemplateUi(); // 読み込んだセッションのテンプレへ表示を追従させる
   render();
   await doSave(); // 復元時の「現在のセッション」として設定（結果はステータスに出る）
 }
 
 // ---------- 品番セレクト ----------
-function refreshPartSelect(): void {
+/**
+ * 「測定中」表示を現在のセッションから更新する。
+ * 品番セレクトは「次に新規測定/編集で使う対象」であってシートの状態ではないため、
+ * ここは必ず state.session を情報源にする。
+ */
+function syncSheetHeader(): void {
+  const deleted = !getTemplate(templateKey(state.session));
+  els.sheetTemplate.textContent = templateLabel(state.session) + (deleted ? '（削除済み）' : '');
+  els.sheetTemplate.classList.toggle('warn', deleted);
+}
+
+/** セレクトが現在のセッションと違うテンプレを指しているとき、未適用であることを示す。 */
+function syncPartSelectNote(): void {
+  const diverged = els.partSelect.value !== templateKey(state.session);
+  els.partSelectNote.textContent = diverged ? '未適用（「新規測定」で適用）' : '';
+  els.partSelectNote.classList.toggle('warn', diverged);
+}
+
+/**
+ * 品番セレクト・「測定中」表示・未適用注記をまとめて現在の状態へ同期する。
+ * セッションを差し替えたときとテンプレ一覧が変わったときに呼ぶ。
+ * （render() は入力のたびに走るので、localStorage を読む処理はここに寄せて呼ばない）
+ */
+function syncTemplateUi(): void {
   const tpls = listTemplates();
   els.partSelect.replaceChildren();
   const curKey = templateKey(state.session);
+
+  // 現セッションのテンプレが削除済みなら、セレクトが無関係なテンプレを
+  // 既定選択して詐称しないよう、選択不可のプレースホルダを立てる
+  if (!tpls.some((t) => templateKey(t) === curKey)) {
+    const opt = document.createElement('option');
+    opt.value = curKey;
+    opt.textContent = `(削除済み) ${templateLabel(state.session)}`;
+    opt.disabled = true;
+    opt.selected = true;
+    els.partSelect.appendChild(opt);
+  }
+
   for (const t of tpls) {
     const opt = document.createElement('option');
     opt.value = templateKey(t);
-    opt.textContent =
-      t.partNo +
-      (t.name ? ` / ${t.name}` : '') +
-      (t.process ? ` / ${t.process}` : '');
+    opt.textContent = templateLabel(t);
     if (opt.value === curKey) opt.selected = true;
     els.partSelect.appendChild(opt);
   }
+
+  syncSheetHeader();
+  syncPartSelectNote();
 }
 
 // ---------- テンプレ編集ダイアログ ----------
@@ -883,7 +928,7 @@ function openTemplateEditor(key?: string): void {
         deleteTemplate(originalKey);
       }
       saveTemplate(newTpl);
-      refreshPartSelect();
+      syncTemplateUi();
       // 編集中の品番が現在のセッションなら反映を促す（新規測定で適用）
     } else if (action === 'delete') {
       const partNoVal = ($('#tplPartNo') as HTMLInputElement).value.trim();
@@ -898,7 +943,7 @@ function openTemplateEditor(key?: string): void {
       const disp = processVal ? `${partNoVal} / ${processVal}` : partNoVal;
       if (partNoVal && confirm(`テンプレ「${disp}」を削除しますか？`)) {
         deleteTemplate(delKey);
-        refreshPartSelect();
+        syncTemplateUi();
       } else {
         e.preventDefault();
       }
@@ -993,7 +1038,7 @@ async function importTemplatesFromFile(file: File): Promise<void> {
         : 'replace';
     }
     const res = importTemplatesJson(text, mode);
-    refreshPartSelect();
+    syncTemplateUi();
     els.voiceStatus.textContent = `テンプレ取込: 新規${res.added}件 / 更新${res.updated}件（${mode === 'replace' ? '全置換' : '追記'}）`;
   } catch (e) {
     alert('取込に失敗しました: ' + (e as Error).message);
@@ -1030,7 +1075,7 @@ async function init(): Promise<void> {
     state.session = newSessionFromTemplate(first);
   }
 
-  refreshPartSelect();
+  syncTemplateUi();
   syncFileNameField();
   render();
 
@@ -1074,10 +1119,9 @@ async function init(): Promise<void> {
   els.loadBtn.addEventListener('click', () => void openLoadDialog());
   els.loadClose.addEventListener('click', () => els.loadDialog.close());
   els.partSelect.addEventListener('change', () => {
-    // 選択しただけでは切替えない（新規測定ボタンで適用）。プレビュー用に通知。
-    const label =
-      els.partSelect.selectedOptions[0]?.textContent ?? '';
-    els.voiceStatus.textContent = `「新規測定」で ${label} を適用`;
+    // 選択しただけでは切替えない（新規測定ボタンで適用）。
+    // 一時的なヒントではなく、未適用であることを常時表示し続ける。
+    syncPartSelectNote();
   });
   els.tplNewBtn.addEventListener('click', () => openTemplateEditor());
   els.tplBtn.addEventListener('click', () => openTemplateEditor(els.partSelect.value));

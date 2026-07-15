@@ -69,6 +69,14 @@ export function templateKey(t: { partNo: string; name?: string; process?: string
   return `${t.partNo}${SEP}${t.name ?? ''}${SEP}${t.process ?? ''}`;
 }
 
+/**
+ * 品番＋品名＋工程を1行の表示名にする（品番セレクト・「測定中」表示・読み込み一覧で共用）。
+ * Session も同じ3フィールドを持つのでそのまま渡せる。
+ */
+export function templateLabel(t: { partNo: string; name?: string; process?: string }): string {
+  return t.partNo + (t.name ? ` / ${t.name}` : '') + (t.process ? ` / ${t.process}` : '');
+}
+
 /** 浮動小数の桁ノイズを抑える丸め */
 function round6(v: number): number {
   return Math.round(v * 1e6) / 1e6;

@@ -144,6 +144,20 @@ input {
   font-weight: 700;
 }
 
+/* 「測定中」= 現在のシートが使っているテンプレート。品番セレクトと違い常に正しい */
+.sheet-template {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+/* テンプレが削除済み / セレクトが未適用 のときは警告色にする */
+.sheet-template.warn,
+#partSelectNote.warn {
+  color: var(--ng);
+  font-weight: 700;
+}
+
 .transcript {
   font-size: 13px;
   color: var(--primary);
