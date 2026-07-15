@@ -13,7 +13,8 @@
 - **TTS読み返し**: 認識値を読み返して誤認識を防止
 - **工程能力**: 列ごとに n / 平均 / σ / Cp / Cpk とヒストグラム（規格線つき）をリアルタイム表示
 - **Excel出力**: 「測定表」＋「工程能力」サマリの .xlsx
-- **自動保存**: IndexedDBへ保存し、再読込で測定中データを復元。PWA対応
+- **自動保存・チーム共有**: 測定データもテンプレートもサーバ（Cosmos DB）へ自動保存し、
+  ログインした全員で共有。再読込で測定中データを復元。PWA（インストール）対応
 
 ## セットアップ
 ```powershell
@@ -41,38 +42,61 @@ npm run preview  # ビルド結果のプレビュー
 - 音声認識は `src/voice/recognizer.ts` のアダプタ層で抽象化済み。
   将来オフライン（Vosk等）へ差し替える場合はこの層のみ置換すればよい。
 - 無償版 SheetJS はセル背景色の書込に未対応のため、Excel上のNGは判定列の "NG" 文字で表現。
+- **データはチーム全員で共有**（ユーザーごとの分離なし）。Azure Static Web Apps の
+  Entra ID 認証が全ルートに掛かるため、閲覧にはログインが必要。
+- **保存には `/api` とネットワークが必要**。SWA のアプリケーション設定
+  `COSMOS_CONNECTION_STRING` が未設定だと API が 500 を返し、
+  アプリは起動するが**共有が無効になり保存が失敗する**（現状 UI に警告は出ない）。
+- Service Worker は無いため、インストールはできるが**オフライン動作はしない**。
 
 ## 構成
 ```
 index.html / styles.css / manifest.webmanifest   画面・スタイル・PWA定義
+public/
+  staticwebapp.config.json  SWA の認証・セキュリティヘッダ設定
+                            （dist に含めるため public/ 配下に置く必要がある）
+  icons/                    PWAアイコン (192/512/maskable)
 src/
   main.ts            画面初期化・状態管理・音声/保存/出力の統合
   types.ts           共通の型定義
   grid.ts            測定グリッド描画
-  template.ts        品番テンプレCRUD・公差計算・JSON書出/取込 (localStorage)
+  template.ts        品番テンプレCRUD・公差計算・JSON書出/取込・サーバ同期
+  store.ts           測定セッションの保存/復元 (/api/sessions クライアント)
+  settings.ts        UI設定の localStorage 読み書き
   judge.ts           公差からのOK/NG判定
   stats.ts           平均/σ/Cp/Cpk
   histogram.ts       ヒストグラム描画 (canvas)
   format.ts          公差の表示文字列フォーマット
+  angle.ts           角度の度分秒↔10進度 変換・整形・解釈
   exportXlsx.ts      .xlsx 出力 (SheetJS)
-  store.ts           測定データ保存/復元 (IndexedDB)
   voice/
     numberParser.ts  日本語数値→number 正規化・音声コマンド判定
     recognizer.ts    Web Speech API アダプタ / TTS / 警告音
   *.test.ts          単体テスト (Vitest)
+api/                 共有ストレージAPI (Azure Functions・Node 20・素のJS)
+  shared/cosmos.js   Cosmos DB 接続・コンテナ自動作成
+  sessions/          GET    /api/sessions
+  sessions-item/     GET|PUT|DELETE /api/sessions/{id}
+  templates/         GET|POST /api/templates
+  templates-delete/  DELETE /api/templates/{key}
 ```
+
+> 内部設計の詳細（データモデル・アルゴリズム・永続化スキーマ・API仕様・既知の負債）は
+> **[docs/SPEC.md](docs/SPEC.md)** を参照。
 
 ## 構成ファイル（設定）
 プロジェクト直下にある設定ファイルの役割。
 
 | ファイル | 役割 |
 |---|---|
-| `package.json` | プロジェクト定義。依存パッケージ（`xlsx`=Excel出力, `idb`=IndexedDB / 開発: `vite`,`typescript`,`vitest`）と npm スクリプト（`dev`/`build`/`preview`/`test`）を記述 |
+| `package.json` | プロジェクト定義。依存パッケージ（実行時は `xlsx`=Excel出力 のみ / 開発: `vite`,`typescript`,`vitest`）と npm スクリプト（`dev`/`build`/`preview`/`test`）を記述 |
 | `tsconfig.json` | TypeScript コンパイラ設定。`strict` 有効・`target: ES2020`・`lib` に DOM を含め、`src` のみを型チェック対象にする |
 | `vite.config.ts` | 開発サーバ／ビルド設定。`base: './'`（相対パス出力で社内サーバ配置に対応）、`server.host: true`（同一LAN内の実機タブレットから接続可）、`port: 5173`、出力先 `dist/` |
 | `index.html` | エントリHTML。ツールバー・グリッド・統計パネル・テンプレ編集ダイアログの骨格と、`manifest`/`styles.css`/`src/main.ts` の読込 |
 | `styles.css` | 画面スタイル（グリッド・判定色・統計カード・ダイアログ等） |
-| `manifest.webmanifest` | PWA 定義（アプリ名・表示モード `standalone`・テーマ色）。タブレットへインストール可能にする |
+| `manifest.webmanifest` | PWA 定義（アプリ名・表示モード `standalone`・テーマ色・アイコン）。タブレットへインストール可能にする |
+| `public/staticwebapp.config.json` | Azure Static Web Apps 設定。全ルートを `authenticated` 必須にし未認証は Entra ID へリダイレクト、`platform.apiRuntime: node:20`、セキュリティヘッダと `Permissions-Policy: microphone=(self)`。**`dist` に含めるため `public/` 配下に置く**（ルートに置くと配信されず認証が掛からない） |
+| `api/package.json` | 共有ストレージAPI（Azure Functions）の定義。依存は `@azure/cosmos` |
 | `.gitignore` | Git 管理から除外する生成物（`node_modules`/`dist` 等） |
 
 ### npm スクリプト
