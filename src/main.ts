@@ -83,6 +83,7 @@ const els = {
   voiceBtn: $('#voiceBtn') as HTMLButtonElement,
   addRowBtn: $('#addRowBtn') as HTMLButtonElement,
   exportBtn: $('#exportBtn') as HTMLButtonElement,
+  saveStatus: $('#saveStatus') as HTMLElement,
   voiceStatus: $('#voiceStatus') as HTMLElement,
   transcript: $('#transcript') as HTMLElement,
   grid: $('#grid') as HTMLElement,
@@ -97,6 +98,11 @@ let recognizer: Recognizer | null = null;
 let pendingBuf = '';
 let commitTimer: number | undefined;
 const SLOW_COMMIT_MS = 1200; // 無音→自動確定までの猶予（容易に調整可）
+
+// 自動保存のタイミング（doSave/autosave が使用）
+const AUTOSAVE_MS = 400; // 入力が続く間はまとめる
+const RETRY_BASE_MS = 2000; // 保存失敗後の初回再試行までの待ち
+const RETRY_MAX_MS = 30000; // 指数バックオフの上限（回数は無制限）
 
 /** 保留バッファと無音タイマーを破棄する。 */
 function resetPending(): void {
@@ -461,18 +467,63 @@ function toggleVoice(): void {
 }
 
 // ---------- 自動保存 ----------
-let saveTimer: number | undefined;
-function autosave(): void {
+// 保存はセッション全量のPUTなので、失敗しても次の保存が同じものを送れば復旧する。
+// そのため未送信キューは持たず、失敗時は「最新の state.session を送り直す」だけでよい。
+type SaveState = 'saved' | 'saving' | 'unsaved' | 'offline';
+
+let saveTimer: number | undefined; // 入力のデバウンス
+let retryTimer: number | undefined; // 失敗後の再試行
+let retryDelay = RETRY_BASE_MS;
+let saveState: SaveState = 'saved';
+
+/** デバウンス中・再試行待ちの保存をすべて取り消す。 */
+function cancelPendingSaves(): void {
   window.clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(() => {
-    void saveSession(state.session);
-  }, 400);
+  window.clearTimeout(retryTimer);
 }
 
-/** 保留中の自動保存を取り消し、現在のセッションを即時保存する。 */
-function flushSave(): Promise<void> {
-  window.clearTimeout(saveTimer);
-  return saveSession(state.session);
+function setSaveState(s: SaveState): void {
+  saveState = s;
+  const warn = s === 'unsaved' || s === 'offline';
+  els.saveStatus.textContent =
+    s === 'saved'
+      ? `保存済み ${new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}`
+      : s === 'saving'
+        ? '保存中…'
+        : s === 'unsaved'
+          ? '⚠ 未保存（再試行中）'
+          : '⚠ 共有サーバに接続できません';
+  els.saveStatus.classList.toggle('warn', warn);
+}
+
+/**
+ * 現在のセッションを保存し、結果をステータスへ反映する。
+ * 失敗したら上限付き指数バックオフで再試行し続ける（復帰したら自動で保存される）。
+ */
+async function doSave(): Promise<boolean> {
+  cancelPendingSaves();
+  setSaveState('saving');
+  const ok = await saveSession(state.session);
+  if (ok) {
+    retryDelay = RETRY_BASE_MS;
+    setSaveState('saved');
+    return true;
+  }
+  setSaveState('unsaved');
+  retryTimer = window.setTimeout(() => void doSave(), retryDelay);
+  retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
+  return false;
+}
+
+function autosave(): void {
+  cancelPendingSaves();
+  retryDelay = RETRY_BASE_MS; // 新しい編集があったのでバックオフをやり直す
+  saveTimer = window.setTimeout(() => void doSave(), AUTOSAVE_MS);
+}
+
+/** 保留中の自動保存・再試行を取り消し、現在のセッションを即時保存する。 */
+function flushSave(): Promise<boolean> {
+  return doSave();
 }
 
 /** セッションに測定データ（値または判定）が入っているか */
@@ -487,13 +538,13 @@ async function startNewSession(): Promise<void> {
   const tpl = getTemplate(els.partSelect.value);
   if (!tpl) return;
   const count = Math.max(1, Math.min(999, Math.floor(Number(els.rowCount.value) || 5)));
-  window.clearTimeout(saveTimer);
+  cancelPendingSaves(); // 旧セッション宛の保存・再試行を残さない
   resetPending(); // 前測定の連結バッファ・タイマーが残らないように
   state.session = newSessionFromTemplate(tpl, count);
   state.active = { row: 0, col: 0 };
-  await saveSession(state.session);
   syncFileNameField();
   render();
+  await doSave(); // 新セッションの保存もステータスに反映する
 }
 
 // ---------- 途中保存 / 読み込み ----------
@@ -543,8 +594,10 @@ function syncFileNameField(): void {
 
 async function saveCurrent(): Promise<void> {
   state.session.label = els.fileName.value.trim() || undefined;
-  await flushSave();
-  els.voiceStatus.textContent = '保存しました';
+  // 失敗時に「保存しました」と偽らない。詳細は #saveStatus 側に出る
+  els.voiceStatus.textContent = (await flushSave())
+    ? '保存しました'
+    : '保存できませんでした';
 }
 
 async function openLoadDialog(): Promise<void> {
@@ -597,16 +650,21 @@ async function openLoadDialog(): Promise<void> {
 }
 
 async function loadSessionById(id: string): Promise<void> {
-  await flushSave(); // 現在の編集内容を確実に保存してから切替（消失防止）
+  // 現在の編集内容を確実に保存してから切替（消失防止）。
+  // 保存できないまま切り替えると未保存分がメモリごと失われるため、切替を中止する。
+  if (!(await flushSave())) {
+    alert('現在の測定を保存できないため、切り替えを中止しました。\n通信状態を確認してください（自動で再試行しています）。');
+    return;
+  }
   const s = await getSession(id);
   if (!s) return;
   resetPending(); // 別セッションへ切替時に連結バッファをクリア
   state.session = s;
   state.active = { row: 0, col: 0 };
-  await saveSession(s); // 復元時の「現在のセッション」として設定
   els.loadDialog.close();
   syncFileNameField();
   render();
+  await doSave(); // 復元時の「現在のセッション」として設定（結果はステータスに出る）
 }
 
 // ---------- 品番セレクト ----------
@@ -945,7 +1003,9 @@ async function importTemplatesFromFile(file: File): Promise<void> {
 // ---------- 初期化 ----------
 async function init(): Promise<void> {
   // サーバー(共有)から全テンプレートを取得して端末キャッシュへ反映（失敗時はキャッシュのまま）
-  await initTemplates();
+  // 到達できなければ保存も失敗するので、起動直後にその旨を出す
+  // （COSMOS_CONNECTION_STRING 未設定はここで気付ける）
+  const synced = await initTemplates();
 
   state = {
     templates: loadTemplates(),
@@ -968,12 +1028,16 @@ async function init(): Promise<void> {
   } else {
     const first = listTemplates()[0];
     state.session = newSessionFromTemplate(first);
-    await saveSession(state.session);
   }
 
   refreshPartSelect();
   syncFileNameField();
   render();
+
+  // 起動時の保存ステータス。復元できた＝サーバーから読めた＝保存済みの状態。
+  if (!synced) setSaveState('offline');
+  else if (restored) setSaveState('saved');
+  else await doSave(); // 新規作成したセッションを保存し、結果を表示する
 
   // イベント
   els.newBtn.addEventListener('click', () => {
@@ -984,14 +1048,24 @@ async function init(): Promise<void> {
   els.newDialog.addEventListener('close', () => {
     const v = els.newDialog.returnValue;
     if (v === 'save') {
-      void flushSave().then(startNewSession);
+      // 保存できないまま新規測定を始めると、旧セッションの未保存分が失われる
+      void flushSave().then((ok) => {
+        if (ok) return startNewSession();
+        alert('保存できなかったため、新規測定を開始しませんでした。\n通信状態を確認してください（自動で再試行しています）。');
+      });
     } else if (v === 'discard') {
-      window.clearTimeout(saveTimer);
+      cancelPendingSaves();
       void deleteSession(state.session.id).then(startNewSession);
     }
     // cancel / その他: 何もしない
   });
   els.saveBtn.addEventListener('click', () => void saveCurrent());
+  // 未保存のまま閉じようとしたら引き止める（最後の入力が失敗したまま立ち去るのを防ぐ）
+  window.addEventListener('beforeunload', (e) => {
+    if (saveState !== 'unsaved') return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
   // 名前を編集したら現在セッションへ反映し自動保存に載せる
   els.fileName.addEventListener('input', () => {
     state.session.label = els.fileName.value.trim() || undefined;
