@@ -134,6 +134,16 @@ input {
   color: #555;
 }
 
+/* 保存ステータス。平時は控えめに、保存できていない時だけ強く出す */
+.save-status {
+  white-space: nowrap;
+}
+
+.save-status.warn {
+  color: var(--ng);
+  font-weight: 700;
+}
+
 .transcript {
   font-size: 13px;
   color: var(--primary);

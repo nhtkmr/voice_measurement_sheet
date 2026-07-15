@@ -41,9 +41,13 @@ async function apiDelete(key: string): Promise<void> {
 /**
  * 起動時にサーバーから全テンプレートを取得し、端末キャッシュ(localStorage)へ反映する。
  * 失敗時は既存キャッシュのまま続行する（アプリを止めない）。
+ *
+ * サーバーへ到達できたかを返す。false なら共有が効いておらず保存も失敗するため、
+ * 呼び出し側は起動直後にその旨を表示する。
+ * 同期しない環境(node のテスト等・canSync() が false)では警告不要なので true を返す。
  */
-export async function initTemplates(): Promise<void> {
-  if (!canSync()) return;
+export async function initTemplates(): Promise<boolean> {
+  if (!canSync()) return true;
   try {
     const res = await fetch(API);
     if (!res.ok) throw new Error(`initTemplates failed: ${res.status}`);
@@ -53,8 +57,10 @@ export async function initTemplates(): Promise<void> {
       if (t && typeof t.partNo === 'string') map[templateKey(t)] = t;
     }
     localStorage.setItem(KEY, JSON.stringify(map));
+    return true;
   } catch (e) {
     console.error(e);
+    return false;
   }
 }
 

@@ -14,14 +14,20 @@ async function send(method: string, url: string, body?: unknown): Promise<Respon
   });
 }
 
-/** 測定セッションを保存（自動保存にも使用） */
-export async function saveSession(session: Session): Promise<void> {
+/**
+ * 測定セッションを保存（自動保存にも使用）。
+ * 保存できたかを返す。呼び出し側はこれを見てUI表示・再試行・切替可否を判断する
+ * （黙って失敗するとデータ消失に気付けないため）。
+ */
+export async function saveSession(session: Session): Promise<boolean> {
   try {
     const res = await send('PUT', `${API}/${encodeURIComponent(session.id)}`, session);
     if (!res.ok) throw new Error(`saveSession failed: ${res.status}`);
     localStorage.setItem(CURRENT, session.id);
+    return true;
   } catch (e) {
     console.error(e);
+    return false;
   }
 }
 

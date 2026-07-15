@@ -216,7 +216,7 @@ export function templateKey(t) {
 
 - レスポンス body は `strip()` 済みのドキュメント、または `{ ok: true, id }`。
 - エラーは `{ error: string }`。例外は一律 500。
-- **`COSMOS_CONNECTION_STRING` 未設定時は `getContainer()` が throw し、全APIが 500 を返す。** クライアント側は全て握り潰すので、**アプリは起動して動くが共有だけが無効になり、保存が黙って失敗する**。
+- **`COSMOS_CONNECTION_STRING` 未設定時は `getContainer()` が throw し、全APIが 500 を返す。** この場合アプリは起動して動くが共有は無効になる。起動時に `initTemplates()` が到達性を返すため、**「⚠ 共有サーバに接続できません」がツールバーに出る**（§9-4）。
 
 ### クライアント側
 
@@ -225,7 +225,16 @@ export function templateKey(t) {
 | `src/store.ts` | `/api/sessions` — セッションCRUD |
 | `src/template.ts` | `/api/templates` — テンプレ同期 |
 
-**両モジュールとも全ての例外を `console.error` で握り潰す**（`saveSession` は `void`、`getSession` は `undefined`、`listSessions` は `[]` を返す）。ネットワーク断でもアプリが止まらない代わりに、**保存失敗がUIに一切出ない**（§13参照）。
+**両モジュールとも例外を投げず、`console.error` に記録して結果を戻り値で返す**。ネットワーク断でもアプリを止めないための設計。
+
+| 関数 | 失敗時の戻り値 |
+|---|---|
+| `saveSession` | `false`（成功で `true`） |
+| `initTemplates` | `false`（到達できた／同期不要なら `true`） |
+| `getSession` | `undefined` |
+| `listSessions` | `[]` |
+
+`saveSession` / `initTemplates` の戻り値は**呼び出し側が保存ステータス表示・再試行・セッション切替の可否判断に使う**（§9-4）。`getSession` / `listSessions` の失敗は現状 UI に出ない。
 
 ---
 
@@ -525,19 +534,39 @@ if (state.session.rows[row].judgments[col] !== 'NG') moveNext();
 
 `commitPending(force)`: `force=true`（`次`/`確定` コマンド由来）はバッファが空・解釈不能でも前進する。`force=false`（無音タイムアウト由来）は前進しない。音声停止時は `resetPending()` で未確定バッファを破棄する。
 
-### 9-4. 自動保存
+### 9-4. 自動保存・保存ステータス・再試行
+
+**保存はセッション全量の PUT であり差分ではない。** この性質がこの設計の土台になっている — 失敗しても次の保存が同じものを送れば復旧するため、**未送信キューも差分の再送も持たない**。再試行は「最新の `state.session` を送り直す」だけでよい。
+
+保存は必ず `doSave()` を通る。`saveSession()` の直接呼び出しは `doSave()` 内の1箇所のみ。
 
 ```ts
-let saveTimer: number | undefined;
-function autosave(): void {
-  window.clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(() => {
-    void saveSession(state.session);
-  }, 400);
-}
+type SaveState = 'saved' | 'saving' | 'unsaved' | 'offline';
+
+const AUTOSAVE_MS = 400;     // 入力のデバウンス（トレーリング）
+const RETRY_BASE_MS = 2000;  // 失敗後の初回再試行
+const RETRY_MAX_MS = 30000;  // 指数バックオフの上限。回数は無制限
 ```
 
-**400ms のトレーリングデバウンス**、タイマーは共有1本。値入力・判定切替・行増減・保存名編集など約7箇所から呼ばれる。`flushSave()` はデバウンスを取り消して即時保存する（新規測定ダイアログの保存パスで使用）。`startNewSession()` は `state.session` を差し替える前にタイマーを止め、古いセッションの遅延保存が走るのを防いでいる。
+| 関数 | 役割 |
+|---|---|
+| `autosave()` | 400ms デバウンスして `doSave()`。新しい編集でバックオフをリセット。**約7箇所から呼ばれる唯一の入口** |
+| `doSave()` | 保存 → ステータス反映 → 失敗なら上限付き指数バックオフで再試行し続ける |
+| `flushSave()` | デバウンス・再試行を取り消して即時保存。成否を返す |
+| `cancelPendingSaves()` | デバウンスと再試行の両タイマーを止める |
+
+`startNewSession()` / `loadSessionById()` は `state.session` を差し替える前に `cancelPendingSaves()` を呼び、**旧セッション宛の遅延保存・再試行が新セッションに化けないようにしている**。
+
+**表示**（`#saveStatus`・ツールバー行2の末尾）: `saved`→「保存済み HH:MM」/ `saving`→「保存中…」/ `unsaved`→「⚠ 未保存（再試行中）」/ `offline`→「⚠ 共有サーバに接続できません」。後者2つは `.warn` クラスで赤字になる。
+
+#### 保存失敗時にデータを失わないためのガード
+
+`saveSession` が成否を返さなかった頃は、**保存に失敗しても画面が先に進んでしまい、メモリ上にしか無い未保存分が失われていた**。以下は「失敗したら進まない」ためのガードであり、単なる表示の問題ではない:
+
+- **「保存して新規」**（`newDialog` の `save`）: `flushSave()` が `false` なら `startNewSession()` を呼ばず `alert()` で通知。旧セッションはそのまま残り、再試行で復旧する
+- **`loadSessionById()`**: `flushSave()` が `false` なら切替を中止
+- **`saveCurrent()`**（途中保存）: 失敗時に「保存しました」と表示しない
+- **`beforeunload`**: `saveState === 'unsaved'` のときだけ離脱を引き止める（最後の入力が失敗したまま端末を置いて立ち去るのを防ぐ）
 
 ### 9-5. 再描画
 
@@ -547,12 +576,13 @@ function autosave(): void {
 
 ### 9-6. 起動シーケンス（`main.ts: init`）
 
-1. `await initTemplates()` — サーバからテンプレを取得してキャッシュへ
+1. `await initTemplates()` — サーバからテンプレを取得してキャッシュへ。**戻り値がサーバ到達性のヘルスチェックを兼ねる**
 2. `state` を構築
 3. テンプレが0件なら `sampleTemplate()` を保存
-4. `getCurrentSessionId()` → `getSession(id)` でセッション復元。無ければ先頭テンプレから新規作成して保存
+4. `getCurrentSessionId()` → `getSession(id)` でセッション復元。無ければ先頭テンプレから新規作成
 5. `refreshPartSelect()` / `render()`
-6. イベント配線、設定値をコントロールへ反映
+6. 保存ステータスの初期化 — 到達不可なら `offline`、復元できたなら（サーバから読めた＝保存済みなので）`saved`、新規作成したなら `doSave()` して結果を表示
+7. イベント配線、設定値をコントロールへ反映
 7. `isVoiceSupported()` が false なら音声ボタンを無効化し「手入力で利用可」と案内
 8. `syncTopbarHeight()` でツールバー実測高を CSS 変数 `--topbar-h` に設定（`ResizeObserver` + `resize` で追従）
 
@@ -629,13 +659,14 @@ function autosave(): void {
 ## 12. テスト
 
 ```powershell
-npm test        # Vitest 65件
+npm test        # Vitest 76件
 npm run build   # tsc の型チェック + 本番ビルド
 ```
 
 | ファイル | 対象 |
 |---|---|
 | `template.test.ts` | 公差計算、複合キー、旧形式の自動移行、JSON往復、取込時の `upper` 再計算 |
+| `store.test.ts` | `fetch` をモックし、**成功/500/ネット断で `saveSession` の戻り値**、全量PUTであること、復帰後の再送、`vms.currentSessionId` の記録/削除 |
 | `settings.test.ts` | 4設定の既定値と往復 |
 | `stats.test.ts` | 平均/σ/Cp/Cpk と境界条件 |
 | `angle.test.ts` | DMS往復、秒の桁上がり、`parseAngle` の5構文 |
@@ -645,7 +676,7 @@ npm run build   # tsc の型チェック + 本番ビルド
 
 テストは localStorage を `Map` ベースのモックで差し替える。`template.ts` の `canSync()` が `typeof window`/`fetch` を見ているため、**node環境のテストではサーバ同期が自動的にスキップ**される。
 
-**自動テストが無い領域**（正直に記す）: `store.ts` 全体、`api/` 全体、`main.ts`（UI配線・カーソル前進・NG停留・デバウンス）、`recognizer.ts`（ブラウザAPIグルー）。**サーバ永続化パスの自動カバレッジはゼロ。**
+**自動テストが無い領域**（正直に記す）: `api/` 全体、`main.ts`（UI配線・カーソル前進・NG停留・デバウンス・保存ステータス・再試行）、`recognizer.ts`（ブラウザAPIグルー）。`store.ts` は単体テストが入ったが、**サーバ側（`api/`）の自動カバレッジは依然ゼロ。**
 
 ---
 
@@ -662,7 +693,7 @@ npm run build   # tsc の型チェック + 本番ビルド
 ### 動作
 
 - **取込 `mode: 'replace'` はサーバ側を削除しない**（コード中にも「簡易実装」と明記）。ローカルを全置換しても次回 `initTemplates()` でサーバから復活する。
-- **保存失敗がUIに出ない** — `saveSession` の例外は `console.error` のみ。`COSMOS_CONNECTION_STRING` 未設定やネットワーク断で、ユーザーは保存できたと誤認したまま測定を続けられる。**現状で最も実害の大きい負債。**
+- `getSession()` / `listSessions()` の失敗は今も UI に出ない（`undefined` / `[]` を返すだけ）。読み込み一覧が「保存データはありません」と表示されたとき、**本当に無いのか通信できていないのかを区別できない**。保存側は §9-4 で解決済み。
 - `listSessions()` は**全セッションを無制限に取得**する（`ORDER BY c.date DESC` の全件フェッチ）。TTL も件数上限も枝刈りも無いため、読み込みダイアログを開くたびに全件がメモリに載る。
 
 ### 構成
