@@ -299,7 +299,8 @@ function moveNext(): void {
     if (col >= nCols) {
       col = 0;
       row++;
-      if (row >= state.session.rows.length) addRow(); // 次の1本へ自動追加
+      // 最終セルでは留まる（本数は「本数」欄と「＋1本追加」で手動管理）
+      if (row >= state.session.rows.length) return;
     }
   } else {
     row++;
