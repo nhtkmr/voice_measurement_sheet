@@ -1,12 +1,15 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   applyTolerance,
   saveTemplate,
+  deleteTemplate,
+  initTemplates,
   listTemplates,
   loadTemplates,
   getTemplate,
   templateKey,
   templateLabel,
+  templateFieldError,
   exportTemplatesJson,
   importTemplatesJson,
 } from './template';
@@ -48,6 +51,118 @@ describe('templateLabel', () => {
       date: '2026-01-01T00:00:00.000Z', items: [], rows: [],
     };
     expect(templateLabel(session)).toBe('P-200 / 別部品 / 仕上げ');
+  });
+});
+
+describe('templateFieldError（テンプレ消失につながる文字を弾く）', () => {
+  it('正常な値は null（ハイフン・中間の空白は許可）', () => {
+    expect(templateFieldError('品番', 'SAMPLE-001', true)).toBeNull();
+    expect(templateFieldError('品番', 'ABC 123', true)).toBeNull();
+    expect(templateFieldError('品名', '')).toBeNull(); // 品名は空でも可
+  });
+  it('品番が空なら弾く', () => {
+    expect(templateFieldError('品番', '', true)).toContain('品番');
+    expect(templateFieldError('品番', '   ', true)).toContain('品番');
+  });
+  it('Cosmos ID に使えない文字（/ \\ ? #）を弾く', () => {
+    expect(templateFieldError('品番', 'ABC/123', true)).not.toBeNull();
+    expect(templateFieldError('品番', 'A\\B', true)).not.toBeNull();
+    expect(templateFieldError('品番', 'A?B', true)).not.toBeNull();
+    expect(templateFieldError('品番', 'A#B', true)).not.toBeNull();
+  });
+  it('複合キーの区切り文字 U+241F を弾く', () => {
+    expect(templateFieldError('品番', 'A␟B', true)).not.toBeNull();
+  });
+  it('制御文字（タブ等）を弾く', () => {
+    expect(templateFieldError('品番', 'A\tB', true)).not.toBeNull();
+  });
+  it('前後の空白を弾く', () => {
+    expect(templateFieldError('品番', ' P-1', true)).toContain('空白');
+    expect(templateFieldError('品番', 'P-1 ', true)).toContain('空白');
+  });
+});
+
+describe('未同期テンプレの保護（消失防止）', () => {
+  // canSync() を true にするため window と fetch を用意する
+  let calls: { method: string; url: string }[];
+  beforeEach(() => {
+    calls = [];
+    (globalThis as any).window = {};
+    vi.spyOn(console, 'error').mockImplementation(() => {}); // 想定内の失敗ログを抑制
+  });
+  afterEach(() => {
+    delete (globalThis as any).window;
+    delete (globalThis as any).fetch;
+    vi.restoreAllMocks();
+  });
+  const mockFetch = (impl: (method: string, url: string) => any) => {
+    (globalThis as any).fetch = vi.fn((url: string, init?: any) => {
+      const method = init?.method ?? 'GET';
+      calls.push({ method, url });
+      return Promise.resolve(impl(method, url));
+    });
+  };
+
+  it('保存がサーバー失敗しても、次回の initTemplates で消えない（サーバー一覧に無くても残す）', async () => {
+    // POST(upsert) は失敗、GET(initTemplates) は空一覧を返す
+    mockFetch((method) =>
+      method === 'GET'
+        ? { ok: true, json: async () => [] }
+        : { ok: false, status: 500 }
+    );
+    const ok = await saveTemplate({ partNo: 'P-NEW', items: [] });
+    expect(ok).toBe(false); // サーバー保存は失敗
+    expect(loadTemplates()['P-NEW␟␟']).toBeTruthy(); // ローカルには有る
+
+    // サーバーは P-NEW を知らない。従来はここで消えていた。
+    await initTemplates();
+    expect(loadTemplates()['P-NEW␟␟']).toBeTruthy(); // 保護されて残る
+  });
+
+  it('サーバーが復帰したら再送され、保護対象から外れる', async () => {
+    let serverHasIt = false;
+    mockFetch((method) => {
+      if (method === 'GET') return { ok: true, json: async () => (serverHasIt ? [{ partNo: 'P-NEW', items: [] }] : []) };
+      if (method === 'POST') { serverHasIt = true; return { ok: true }; } // 今度は成功
+      return { ok: true };
+    });
+    // 1回目: 失敗させて未同期にする
+    (globalThis as any).fetch = vi.fn((_url: string, init?: any) =>
+      Promise.resolve(init?.method === 'POST' ? { ok: false, status: 500 } : { ok: true, json: async () => [] })
+    );
+    await saveTemplate({ partNo: 'P-NEW', items: [] });
+
+    // 2回目: POST が成功するモックに差し替え、initTemplates で再送
+    mockFetch((method) => {
+      if (method === 'GET') return { ok: true, json: async () => [] };
+      if (method === 'POST') return { ok: true };
+      return { ok: true };
+    });
+    await initTemplates();
+    // 再送(POST)が呼ばれたこと＝保護対象を送り直している
+    expect(calls.some((c) => c.method === 'POST')).toBe(true);
+    // まだローカルに残っている（消えていない）
+    expect(loadTemplates()['P-NEW␟␟']).toBeTruthy();
+  });
+
+  it('削除がサーバー失敗しても、次回の initTemplates でサーバーから復活しない', async () => {
+    // まず正常に1件作る（POST 成功）
+    mockFetch(() => ({ ok: true, json: async () => [] }));
+    await saveTemplate({ partNo: 'P-DEL', items: [] });
+
+    // 削除は失敗させる。GET はまだ P-DEL を返す（サーバー未反映）
+    mockFetch((method) =>
+      method === 'GET'
+        ? { ok: true, json: async () => [{ partNo: 'P-DEL', items: [] }] }
+        : { ok: false, status: 500 } // DELETE 失敗
+    );
+    const ok = await deleteTemplate('P-DEL␟␟');
+    expect(ok).toBe(false);
+    expect(loadTemplates()['P-DEL␟␟']).toBeUndefined(); // ローカルからは消えた
+
+    // サーバーはまだ持っている。従来はここで復活していた。
+    await initTemplates();
+    expect(loadTemplates()['P-DEL␟␟']).toBeUndefined(); // 復活しない
   });
 });
 

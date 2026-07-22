@@ -86,6 +86,18 @@
       </menu>
     </dialog>
 
+    <dialog id="importDialog" class="confirm-dialog">
+      <form method="dialog">
+        <h2>テンプレートの取込</h2>
+        <p>既存のテンプレートにどう反映しますか？</p>
+        <menu class="dialog-actions">
+          <button value="cancel">キャンセル</button>
+          <button value="replace" class="danger">全置換</button>
+          <button value="merge" class="primary">追記（同じ品番は上書き）</button>
+        </menu>
+      </form>
+    </dialog>
+
     <dialog id="tplDialog" class="tpl-dialog">
       <form method="dialog" id="tplForm">
         <h2>品番テンプレート編集</h2>
