@@ -1,10 +1,32 @@
-import type { Template, MeasureItem, ItemType } from './types';
+﻿import type { Template, MeasureItem, ItemType } from './types';
 import { isNumericItem } from './types';
 
 const KEY = 'vms.templates';
+// サーバーへ未反映(未同期)のキーを覚えておく。起動時の全置換で消さないため（§Path A対策）。
+const PENDING_KEY = 'vms.templates.pending';
 
-/** 複合キーの区切り（通常入力されない制御文字 U+241F / UNIT SEPARATOR） */
+/** 複合キーの区切り（通常入力されない記号 U+241F / SYMBOL FOR UNIT SEPARATOR） */
 const SEP = '␟';
+
+// Cosmos DB のドキュメントID(=templateKey)に使えない文字。品番等に含むと
+// サーバー保存が失敗して消失につながるため、入力段階で弾く。
+// あわせて複合キーの区切り SEP(U+241F) と制御文字も禁止する。
+// ハイフンや中間の空白は許可（例「SAMPLE-001」）。前後空白は別途 trim 比較で弾く。
+// eslint-disable-next-line no-control-regex
+const FORBIDDEN_CHARS = /[/\\?#\u241F\u0000-\u001F\u007F]/;
+
+/**
+ * 品番/品名/工程の1フィールドを検査する。問題があればメッセージ、無ければ null。
+ * @param label 表示用のフィールド名（例「品番」）
+ * @param value 入力値
+ * @param required 空を許さないか（品番のみ true）
+ */
+export function templateFieldError(label: string, value: string, required = false): string | null {
+  if (required && value.trim() === '') return `${label}を入力してください。`;
+  if (value !== value.trim()) return `${label}の前後に空白は使えません。`;
+  if (FORBIDDEN_CHARS.test(value)) return `${label}に使えない文字（/ \\ ? # など）が含まれています。`;
+  return null;
+}
 
 // ---------- サーバー同期（Azure Functions /api/templates） ----------
 // localStorage を「端末キャッシュ」として使い、読み取りは同期のまま高速に返す。
@@ -14,8 +36,32 @@ const API = '/api/templates';
 const canSync = (): boolean =>
   typeof window !== 'undefined' && typeof fetch === 'function';
 
-async function apiUpsert(tpl: Template): Promise<void> {
-  if (!canSync()) return;
+// ---------- 未同期キューの追跡 ----------
+// サーバーへ反映できていない変更を localStorage に覚えておき、
+// 起動時の全置換(initTemplates)で消えないよう保護する。
+// { [key]: 'upsert' | 'delete' } の形。
+type PendingOp = 'upsert' | 'delete';
+
+function getPending(): Record<string, PendingOp> {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY);
+    const obj = raw ? (JSON.parse(raw) as Record<string, PendingOp>) : {};
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch {
+    return {};
+  }
+}
+
+function setPending(key: string, op: PendingOp | null): void {
+  const p = getPending();
+  if (op === null) delete p[key];
+  else p[key] = op;
+  localStorage.setItem(PENDING_KEY, JSON.stringify(p));
+}
+
+/** サーバーへ upsert。成功したかを返す。 */
+async function apiUpsert(tpl: Template): Promise<boolean> {
+  if (!canSync()) return true; // 同期しない環境(テスト)では成功扱い
   try {
     const res = await fetch(API, {
       method: 'POST',
@@ -23,18 +69,23 @@ async function apiUpsert(tpl: Template): Promise<void> {
       body: JSON.stringify(tpl),
     });
     if (!res.ok) throw new Error(`template upsert failed: ${res.status}`);
+    return true;
   } catch (e) {
     console.error(e);
+    return false;
   }
 }
 
-async function apiDelete(key: string): Promise<void> {
-  if (!canSync()) return;
+/** サーバーから delete。成功したかを返す（404 も成功扱い）。 */
+async function apiDelete(key: string): Promise<boolean> {
+  if (!canSync()) return true;
   try {
     const res = await fetch(`${API}/${encodeURIComponent(key)}`, { method: 'DELETE' });
     if (!res.ok && res.status !== 404) throw new Error(`template delete failed: ${res.status}`);
+    return true;
   } catch (e) {
     console.error(e);
+    return false;
   }
 }
 
@@ -56,7 +107,24 @@ export async function initTemplates(): Promise<boolean> {
     for (const t of arr) {
       if (t && typeof t.partNo === 'string') map[templateKey(t)] = t;
     }
+
+    // 未同期の変更をサーバー一覧へ上書きさせない（消失防止）:
+    // ・upsert 保留 … サーバーに無くてもローカル値を残す
+    // ・delete 保留 … サーバーに有ってもローカルからは除く
+    const pending = getPending();
+    const local = loadTemplates();
+    for (const [key, op] of Object.entries(pending)) {
+      if (op === 'upsert' && local[key]) map[key] = local[key];
+      else if (op === 'delete') delete map[key];
+    }
+
     localStorage.setItem(KEY, JSON.stringify(map));
+
+    // 保留分をサーバーへ再送。成功したものは保留から落とす。
+    for (const [key, op] of Object.entries(pending)) {
+      const ok = op === 'upsert' && map[key] ? await apiUpsert(map[key]) : await apiDelete(key);
+      if (ok) setPending(key, null);
+    }
     return true;
   } catch (e) {
     console.error(e);
@@ -131,19 +199,28 @@ export function getTemplate(key: string): Template | undefined {
   return loadTemplates()[key];
 }
 
-/** テンプレートを保存（品番␟品名␟工程 をキーに upsert）。キャッシュ更新＋サーバー反映。 */
-export function saveTemplate(tpl: Template): void {
+/**
+ * テンプレートを保存（品番␟品名␟工程 をキーに upsert）。キャッシュ更新＋サーバー反映。
+ * サーバーへ反映できたかを返す。失敗時は未同期として記録し、次回起動時に再送・保護する。
+ */
+export async function saveTemplate(tpl: Template): Promise<boolean> {
+  const key = templateKey(tpl);
   const all = loadTemplates();
-  all[templateKey(tpl)] = tpl;
+  all[key] = tpl;
   localStorage.setItem(KEY, JSON.stringify(all));
-  void apiUpsert(tpl);
+  const ok = await apiUpsert(tpl);
+  setPending(key, ok ? null : 'upsert');
+  return ok;
 }
 
-export function deleteTemplate(key: string): void {
+/** テンプレートを削除。サーバーへ反映できたかを返す。失敗時は未同期として記録する。 */
+export async function deleteTemplate(key: string): Promise<boolean> {
   const all = loadTemplates();
   delete all[key];
   localStorage.setItem(KEY, JSON.stringify(all));
-  void apiDelete(key);
+  const ok = await apiDelete(key);
+  setPending(key, ok ? null : 'delete');
+  return ok;
 }
 
 // ---------- JSON 書き出し / 取り込み ----------
@@ -236,8 +313,12 @@ export function importTemplatesJson(json: string, mode: 'merge' | 'replace' = 'm
   }
   localStorage.setItem(KEY, JSON.stringify(store));
   // サーバーへ反映（best-effort）。replace でもサーバー側の削除は行わない簡易実装。
+  // 失敗分は未同期として記録し、起動時の全置換で消えないよう保護する。
   if (canSync()) {
-    for (const t of Object.values(store)) void apiUpsert(t);
+    for (const t of Object.values(store)) {
+      const k = templateKey(t);
+      void apiUpsert(t).then((ok) => setPending(k, ok ? null : 'upsert'));
+    }
   }
   return { added, updated, total: valid.length };
 }

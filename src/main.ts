@@ -8,6 +8,7 @@ import {
   deleteTemplate,
   templateKey,
   templateLabel,
+  templateFieldError,
   sampleTemplate,
   loadTemplates,
   applyTolerance,
@@ -71,6 +72,7 @@ const els = {
   loadBtn: $('#loadBtn') as HTMLButtonElement,
   newDialog: $('#newDialog') as HTMLDialogElement,
   loadDialog: $('#loadDialog') as HTMLDialogElement,
+  importDialog: $('#importDialog') as HTMLDialogElement,
   loadList: $('#loadList') as HTMLElement,
   loadClose: $('#loadClose') as HTMLButtonElement,
   tplNewBtn: $('#tplNewBtn') as HTMLButtonElement,
@@ -909,47 +911,72 @@ function openTemplateEditor(key?: string): void {
     renderItems(cur);
   };
 
+  // 保存/削除は非同期(サーバー同期の成否を見る)ので、submit を止めて自前で処理し、
+  // 成功時に手動でダイアログを閉じる。バリデーションエラー時は閉じない。
+  const submitSave = async (): Promise<void> => {
+    const partNoVal = ($('#tplPartNo') as HTMLInputElement).value.trim();
+    const nameVal = ($('#tplName') as HTMLInputElement).value.trim();
+    const processVal = ($('#tplProcess') as HTMLInputElement).value.trim();
+
+    // 使えない文字を弾く（サーバーのID制約で消失につながるため入力段階で防ぐ）
+    const err =
+      templateFieldError('品番', partNoVal, true) ||
+      templateFieldError('品名', nameVal) ||
+      templateFieldError('工程', processVal);
+    if (err) {
+      alert(err);
+      return; // ダイアログは閉じない
+    }
+
+    const newTpl: Template = {
+      partNo: partNoVal,
+      name: nameVal || undefined,
+      process: processVal || undefined,
+      items: collectItems().filter((i) => i.label !== ''),
+    };
+
+    // 品番/品名/工程を変えてキーが変わった＝別テンプレになる。旧を消すか確認する。
+    if (existing && originalKey && originalKey !== templateKey(newTpl)) {
+      const keepOld = !confirm(
+        `品番・品名・工程を変更したため、別のテンプレートになります。\n` +
+          `元の「${templateLabel(existing)}」を削除しますか？\n` +
+          `（キャンセルすると元のテンプレートも残ります）`
+      );
+      if (!keepOld) await deleteTemplate(originalKey);
+    }
+
+    const ok = await saveTemplate(newTpl);
+    syncTemplateUi();
+    els.tplDialog.close();
+    if (!ok) alert('ローカルに保存しました。サーバーに接続でき次第、自動で同期します。');
+  };
+
+  const submitDelete = async (): Promise<void> => {
+    const partNoVal = ($('#tplPartNo') as HTMLInputElement).value.trim();
+    const nameVal = ($('#tplName') as HTMLInputElement).value.trim();
+    const processVal = ($('#tplProcess') as HTMLInputElement).value.trim();
+    if (!partNoVal) {
+      els.tplDialog.close();
+      return;
+    }
+    const delKey =
+      originalKey ??
+      templateKey({ partNo: partNoVal, name: nameVal || undefined, process: processVal || undefined });
+    const disp = templateLabel({ partNo: partNoVal, name: nameVal || undefined, process: processVal || undefined });
+    if (!confirm(`テンプレ「${disp}」を削除しますか？`)) return; // 閉じない
+    const ok = await deleteTemplate(delKey);
+    syncTemplateUi();
+    els.tplDialog.close();
+    if (!ok) alert('ローカルでは削除しました。サーバーに接続でき次第、自動で反映します。');
+  };
+
   const form = $('#tplForm') as HTMLFormElement;
   form.onsubmit = (e) => {
+    e.preventDefault();
     const action = (e.submitter as HTMLButtonElement)?.value;
-    if (action === 'save') {
-      const partNoVal = ($('#tplPartNo') as HTMLInputElement).value.trim();
-      if (!partNoVal) {
-        e.preventDefault();
-        return;
-      }
-      const newTpl: Template = {
-        partNo: partNoVal,
-        name: ($('#tplName') as HTMLInputElement).value.trim() || undefined,
-        process: ($('#tplProcess') as HTMLInputElement).value.trim() || undefined,
-        items: collectItems().filter((i) => i.label !== ''),
-      };
-      // 品番/品名/工程を編集してキーが変わった場合は旧エントリを削除
-      if (originalKey && originalKey !== templateKey(newTpl)) {
-        deleteTemplate(originalKey);
-      }
-      saveTemplate(newTpl);
-      syncTemplateUi();
-      // 編集中の品番が現在のセッションなら反映を促す（新規測定で適用）
-    } else if (action === 'delete') {
-      const partNoVal = ($('#tplPartNo') as HTMLInputElement).value.trim();
-      const processVal = ($('#tplProcess') as HTMLInputElement).value.trim();
-      const delKey =
-        originalKey ??
-        templateKey({
-          partNo: partNoVal,
-          name: ($('#tplName') as HTMLInputElement).value.trim() || undefined,
-          process: processVal || undefined,
-        });
-      const disp = processVal ? `${partNoVal} / ${processVal}` : partNoVal;
-      if (partNoVal && confirm(`テンプレ「${disp}」を削除しますか？`)) {
-        deleteTemplate(delKey);
-        syncTemplateUi();
-      } else {
-        e.preventDefault();
-      }
-    }
-    els.tplDialog.close();
+    if (action === 'save') void submitSave();
+    else if (action === 'delete') void submitDelete();
+    else els.tplDialog.close(); // キャンセル
   };
 
   els.tplDialog.showModal();
@@ -1025,18 +1052,31 @@ function exportTemplates(): void {
   URL.revokeObjectURL(url);
 }
 
+/** 取込方法を3択ダイアログで尋ねる。Esc/背景クリックは cancel(何もしない)。 */
+function askImportMode(): Promise<'merge' | 'replace' | 'cancel'> {
+  return new Promise((resolve) => {
+    const dlg = els.importDialog;
+    const onClose = () => {
+      dlg.removeEventListener('close', onClose);
+      const v = dlg.returnValue;
+      resolve(v === 'merge' || v === 'replace' ? v : 'cancel');
+    };
+    dlg.addEventListener('close', onClose);
+    dlg.returnValue = ''; // Esc で閉じたときに前回値を残さない
+    dlg.showModal();
+  });
+}
+
 async function importTemplatesFromFile(file: File): Promise<void> {
   try {
     const text = await file.text();
-    // 既存があれば追記(merge)か全置換(replace)かを確認
+    // 既存があれば追記(merge)/全置換(replace)/中止 を確認。
+    // 全置換は破壊的なので、明示的に選んだときだけ。Esc/キャンセルは中止(何もしない)。
     let mode: 'merge' | 'replace' = 'merge';
     if (Object.keys(loadTemplates()).length > 0) {
-      mode = confirm(
-        '既存のテンプレートに「追記/上書き」しますか？\n' +
-          '［OK］追記（品番・品名・工程が同じものは上書き） ／ ［キャンセル］全置換'
-      )
-        ? 'merge'
-        : 'replace';
+      const choice = await askImportMode();
+      if (choice === 'cancel') return;
+      mode = choice;
     }
     const res = importTemplatesJson(text, mode);
     syncTemplateUi();
@@ -1061,7 +1101,7 @@ async function init(): Promise<void> {
 
   // テンプレが無ければサンプルを投入（サーバーにも反映される）
   if (Object.keys(state.templates).length === 0) {
-    saveTemplate(sampleTemplate());
+    await saveTemplate(sampleTemplate());
     state.templates = loadTemplates();
   }
 
